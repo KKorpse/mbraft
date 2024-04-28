@@ -20,14 +20,43 @@
 #include <braft/util.h>          // braft::AsyncClosureGuard
 #include <brpc/controller.h>     // brpc::Controller
 #include <brpc/server.h>         // brpc::Server
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <gflags/gflags.h> // DEFINE_*
+#include <mutex>
 #include <vector>
-
 namespace mbraft {
 
 #define INVALIED_GROUP_ID -1
+#define INVALID_LEADER_COUNT -1
+
+class SynchronizedCountClosure : public braft::Closure {
+public:
+  explicit SynchronizedCountClosure(int num_signal) : _count(num_signal) {}
+
+  void Run() override {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (--_count <= 0) {
+      _cv.notify_all();
+    }
+  }
+
+  void wait() {
+    std::unique_lock<std::mutex> lock(_mutex);
+    _cv.wait(lock, [this] { return _count <= 0; });
+  }
+
+  void reset(int num_signal) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _count = num_signal;
+  }
+
+private:
+  int _count;
+  std::mutex _mutex;
+  std::condition_variable _cv;
+};
 
 class MulitGroupRaftManager;
 struct SingleMachineOptions {
@@ -37,10 +66,8 @@ struct SingleMachineOptions {
 // Implement the simplest state machine as a raft group.
 class SingleMachine : public braft::StateMachine {
 public:
-  void init(SingleMachineOptions &options) {
-    CHECK(options.raft_manager != nullptr);
-    _raft_manager = options.raft_manager;
-  }
+  void init(SingleMachineOptions &options);
+  bool is_leader() { return _is_leader; }
 
   void on_apply(braft::Iterator &iter);
 
@@ -61,6 +88,7 @@ private:
   braft::Node *volatile _node;
   MulitGroupRaftManager *_raft_manager = nullptr;
   int32_t _group_id = INVALIED_GROUP_ID;
+  bool _is_leader = false;
 };
 
 struct MulitGroupRaftManagerOptions {
@@ -70,8 +98,10 @@ struct MulitGroupRaftManagerOptions {
 
 // Manage all the raft groups, limit all the leader on one node.
 class MulitGroupRaftManager {
+  friend class SingleMachine;
+
 public:
-  MulitGroupRaftManager();
+  MulitGroupRaftManager(){};
   ~MulitGroupRaftManager() {}
 
   void init(MulitGroupRaftManagerOptions &options) {
@@ -82,20 +112,21 @@ public:
       _machines.emplace_back();
       _machines.back().init(machine_options);
     }
-
-    
   }
 
 private:
-  // end of @braft::StateMachine
+  void on_leader_start(int32_t group_id);
+  void on_start_following(int32_t group_id);
+  void coordinate_leader_if_need();
 
 private:
   std::vector<SingleMachine> _machines;
 
-  // The number of leaders on this node.
-  // When the _machines[0] is the leader of the group, set _leader_count to 1
-  // and change all the other group's leader to this node.
-  std::atomic<int32_t> _leader_count{0};
+  // When the _machines[0] becomes the leader of the group, set it to true
+  // Change all the other group's leader to this node.
+  bool _wait_for_coordinate = false;
+  std::unique_ptr<SynchronizedCountClosure> _coordinate_clousure{nullptr};
+  std::atomic<size_t> _election_done_count{0};
 };
 
 } // namespace mbraft
