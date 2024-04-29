@@ -134,6 +134,9 @@ void MulitGroupRaftManager::coordinate_leader_if_need() {
   // _coordinate_clousure->Run() be called in on_leader_start().
   _coordinate_clousure->wait();
   LOG(WARNING) << "Coordinate leader done.";
+
+  _wait_for_coordinate = false;
+  _coordinate_clousure.reset(nullptr);
 }
 
 void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
