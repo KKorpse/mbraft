@@ -19,6 +19,7 @@
 #include <brpc/channel.h>
 #include <brpc/controller.h> // brpc::Controller
 #include <brpc/server.h>     // brpc::Server
+#include <bthread/bthread.h>
 #include <cassert>
 #include <gflags/gflags.h> // DEFINE_*
 #include <memory>
@@ -95,6 +96,13 @@ void SingleMachine::on_start_following(
   _raft_manager->on_start_following(_group_id);
 }
 
+void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
+  CHECK(machine != nullptr);
+  auto sm = static_cast<SingleMachine *>(machine);
+  sm->request_leadership();
+  return nullptr;
+}
+
 void MulitGroupRaftManager::coordinate_leader_if_need() {
   if (!_wait_for_coordinate) {
     // Only primary node should coordinate leader.
@@ -116,7 +124,14 @@ void MulitGroupRaftManager::coordinate_leader_if_need() {
 
   _coordinate_clousure.reset(
       new SynchronizedCountClosure(none_leader_machines.size()));
-  // TODO: do the leader change.
+  for (auto &machine : none_leader_machines) {
+    bthread_t tid;
+    if (bthread_start_background(&tid, NULL, send_change_leader_req, machine) !=
+        0) {
+      LOG(ERROR) << "Fail to start bthread";
+    }
+  }
+  // _coordinate_clousure->Run() be called in on_leader_start().
   _coordinate_clousure->wait();
   LOG(WARNING) << "Coordinate leader done.";
 }

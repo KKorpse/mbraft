@@ -119,6 +119,7 @@ private:
   void on_leader_start(int32_t group_id);
   void on_start_following(int32_t group_id);
   void coordinate_leader_if_need();
+  static void *send_change_leader_req(void *machine);
 
 private:
   std::vector<std::unique_ptr<SingleMachine>> _machines;
