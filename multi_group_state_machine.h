@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "mbraft.pb.h" // AppendEntriesRPC
 #include <atomic>
 #include <braft/configuration.h>
 #include <braft/protobuf_file.h> // braft::ProtoBufFile
@@ -20,10 +21,12 @@
 #include <braft/util.h>          // braft::AsyncClosureGuard
 #include <brpc/controller.h>     // brpc::Controller
 #include <brpc/server.h>         // brpc::Server
+#include <cassert>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <gflags/gflags.h> // DEFINE_*
+#include <memory>
 #include <mutex>
 #include <vector>
 namespace mbraft {
@@ -68,16 +71,14 @@ class SingleMachine : public braft::StateMachine {
 public:
   void init(SingleMachineOptions &options);
   bool is_leader() { return _is_leader; }
+  void change_leader_to(braft::PeerId to);
+  void request_leadership();
 
   void on_apply(braft::Iterator &iter);
-
   void on_snapshot_save(braft::SnapshotWriter *writer, braft::Closure *done);
-
   int on_snapshot_load(braft::SnapshotReader *reader);
-
   void on_leader_start(int64_t term);
   void on_leader_stop(const butil::Status &status);
-
   void on_shutdown();
   void on_error(const ::braft::Error &e);
   void on_configuration_committed(const ::braft::Configuration &conf);
@@ -110,7 +111,7 @@ public:
       SingleMachineOptions machine_options;
       machine_options.raft_manager = this;
       _machines.emplace_back();
-      _machines.back().init(machine_options);
+      _machines.back()->init(machine_options);
     }
   }
 
@@ -120,13 +121,28 @@ private:
   void coordinate_leader_if_need();
 
 private:
-  std::vector<SingleMachine> _machines;
+  std::vector<std::unique_ptr<SingleMachine>> _machines;
 
   // When the _machines[0] becomes the leader of the group, set it to true
   // Change all the other group's leader to this node.
   bool _wait_for_coordinate = false;
   std::unique_ptr<SynchronizedCountClosure> _coordinate_clousure{nullptr};
   std::atomic<size_t> _election_done_count{0};
+};
+
+class MbraftServiceImpl : public MbraftService {
+public:
+  void leader_change(::google::protobuf::RpcController *controller,
+                     const LeaderChangeRequest *request,
+                     LeaderChangeResponse *response,
+                     ::google::protobuf::Closure *done) override {
+    brpc::ClosureGuard done_guard(done);
+    assert(_machine != nullptr);
+    _machine->change_leader_to(braft::PeerId(request->change_to()));
+  }
+
+private:
+  SingleMachine *_machine = nullptr;
 };
 
 } // namespace mbraft

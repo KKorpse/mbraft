@@ -19,7 +19,7 @@ if (NOT PROTOBUF_PROTOC_EXECUTABLE)
     set (PROTOBUF_PROTOC_EXECUTABLE "${PROTO_LIB_DIR}/../bin/protoc")
 endif()
 
-protobuf_generate_cpp(PROTO_SRC PROTO_HEADER counter.proto)
+protobuf_generate_cpp(PROTO_SRC PROTO_HEADER mbraft.proto)
 # include PROTO_HEADER
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
@@ -105,9 +105,9 @@ if ((NOT LEVELDB_INCLUDE_PATH) OR (NOT LEVELDB_LIB))
     message(FATAL_ERROR "Fail to find leveldb")
 endif()
 include_directories(${LEVELDB_INCLUDE_PATH})
+include_directories(${CMAKE_SOURCE_DIR})
 
-add_executable(counter_client client.cpp ${PROTO_SRC} ${PROTO_HEADER})
-add_executable(counter_server server.cpp ${PROTO_SRC} ${PROTO_HEADER})
+add_executable(mbraft mbraft.cpp ${PROTO_SRC} ${PROTO_HEADER})
 
 set(DYNAMIC_LIB
     ${CMAKE_THREAD_LIBS_INIT}
@@ -124,11 +124,8 @@ set(DYNAMIC_LIB
     z
     )
 
-target_link_libraries(counter_client
+
+target_link_libraries(mbraft
                       "-Xlinker \"-(\""
                       ${DYNAMIC_LIB}
-                      "-Xlinker \"-)\"")
-target_link_libraries(counter_server
-                      "-Xlinker \"-(\""
-                      ${DYNAMIC_LIB}
-                      "-Xlinker \"-)\"")
+                      "-Xlinker \"-)\"") 

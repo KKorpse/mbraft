@@ -16,10 +16,15 @@
 #include <braft/raft.h>          // braft::Node braft::StateMachine
 #include <braft/storage.h>       // braft::SnapshotWriter
 #include <braft/util.h>          // braft::AsyncClosureGuard
-#include <brpc/controller.h>     // brpc::Controller
-#include <brpc/server.h>         // brpc::Server
-#include <gflags/gflags.h>       // DEFINE_*
+#include <brpc/channel.h>
+#include <brpc/controller.h> // brpc::Controller
+#include <brpc/server.h>     // brpc::Server
+#include <cassert>
+#include <gflags/gflags.h> // DEFINE_*
+#include <memory>
+#include <vector>
 
+#include "mbraft.pb.h"
 #include "multi_group_state_machine.h"
 
 DEFINE_int32(
@@ -36,6 +41,40 @@ void SingleMachine::init(SingleMachineOptions &options) {
   braft::NodeOptions node_options;
   node_options.election_timeout_ms = FLAGS_election_timeout_ms;
   node_options.snapshot_interval_s = FLAGS_snapshot_interval;
+}
+
+void SingleMachine::change_leader_to(braft::PeerId to) {
+  if (_node->transfer_leadership_to(to) != 0) {
+    LOG(ERROR) << "Fail to transfer leader to " << to.to_string();
+  }
+}
+
+void SingleMachine::request_leadership() {
+  CHECK(!_is_leader);
+  CHECK(_node != nullptr);
+  auto leader = _node->leader_id();
+  CHECK(!leader.is_empty());
+
+  std::unique_ptr<brpc::Controller> cntl(new brpc::Controller());
+  std::unique_ptr<LeaderChangeRequest> request(new LeaderChangeRequest);
+  std::unique_ptr<LeaderChangeResponse> response(new LeaderChangeResponse);
+  request->set_change_to(_node->node_id().peer_id.to_string());
+
+  brpc::Channel channel;
+  brpc::ChannelOptions channel_opt;
+  channel_opt.connect_timeout_ms = 1000;
+  channel_opt.timeout_ms = -1; // We don't need RPC timeout
+  if (channel.Init(leader.addr, &channel_opt) != 0) {
+    LOG(ERROR) << "Fail to init sending channel: "
+               << _node->node_id().peer_id.to_string() << " to "
+               << leader.to_string();
+    return;
+  }
+
+  MbraftService_Stub stub(&channel);
+  LOG(WARNING) << _node->node_id().peer_id.to_string()
+               << " Request leadership from " << leader.to_string();
+  stub.leader_change(cntl.get(), request.get(), response.get(), nullptr);
 }
 
 void SingleMachine::on_leader_start(int64_t term) {
@@ -68,14 +107,15 @@ void MulitGroupRaftManager::coordinate_leader_if_need() {
   }
 
   // Count the none-leader group.
-  int32_t none_leader_count = 0;
+  std::vector<SingleMachine *> none_leader_machines;
   for (auto &machine : _machines) {
-    if (!machine.is_leader()) {
-      none_leader_count++;
+    if (!machine->is_leader()) {
+      none_leader_machines.emplace_back(machine.get());
     }
   }
 
-  _coordinate_clousure.reset(new SynchronizedCountClosure(none_leader_count));
+  _coordinate_clousure.reset(
+      new SynchronizedCountClosure(none_leader_machines.size()));
   // TODO: do the leader change.
   _coordinate_clousure->wait();
   LOG(WARNING) << "Coordinate leader done.";
@@ -84,6 +124,9 @@ void MulitGroupRaftManager::coordinate_leader_if_need() {
 void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
   if (_wait_for_coordinate) {
     // Leader change cause by coordinate, do nothing.
+    CHECK(_coordinate_clousure.get() != nullptr);
+    LOG(WARNING) << "Group " << group_id << " leader change done.";
+    _coordinate_clousure->Run();
     return;
   }
   _election_done_count++;
@@ -94,8 +137,6 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
     // Which means the all the group only change leader once at a time.
     CHECK_EQ(_wait_for_coordinate, false);
 
-    // TODO: Should change all the other group's leader to this node.
-    // At first we should wait until other nodes' election done.
     _wait_for_coordinate = true;
   }
 

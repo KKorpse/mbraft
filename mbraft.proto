@@ -1,0 +1,15 @@
+syntax="proto2";
+package mbraft;
+option cc_generic_services = true;
+
+message LeaderChangeRequest {
+    required string change_to = 1;
+};
+
+message LeaderChangeResponse {
+    optional bool success = 1;
+};
+
+service MbraftService {
+    rpc leader_change(LeaderChangeRequest) returns (LeaderChangeResponse);
+};
