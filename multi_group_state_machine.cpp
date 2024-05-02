@@ -40,8 +40,20 @@ void SingleMachine::init(SingleMachineOptions &options) {
   _raft_manager = options.raft_manager;
 
   braft::NodeOptions node_options;
+  node_options.initial_conf = options.peers;
   node_options.election_timeout_ms = FLAGS_election_timeout_ms;
+  node_options.fsm = this;
+  node_options.node_owns_fsm = false;
   node_options.snapshot_interval_s = FLAGS_snapshot_interval;
+  std::string prefix = "local://" + options.data_path;
+  node_options.log_uri = prefix + "/log";
+  node_options.raft_meta_uri = prefix + "/raft_meta";
+  node_options.snapshot_uri = prefix + "/snapshot";
+  _node.reset(new braft::Node(options.group_id, options.addr));
+  if (_node->init(node_options) != 0) {
+    LOG(ERROR) << "Fail to init raft node";
+    _node.reset(nullptr);
+  }
 }
 
 void SingleMachine::change_leader_to(braft::PeerId to) {

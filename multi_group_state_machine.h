@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "config_manager.h"
 #include "mbraft.pb.h" // AppendEntriesRPC
 #include <atomic>
 #include <braft/configuration.h>
@@ -31,7 +32,7 @@
 #include <vector>
 namespace mbraft {
 
-#define INVALIED_GROUP_ID -1
+#define INVALIED_GROUP_IDX -1
 #define INVALID_LEADER_COUNT -1
 
 class SynchronizedCountClosure : public braft::Closure {
@@ -64,6 +65,11 @@ private:
 class MulitGroupRaftManager;
 struct SingleMachineOptions {
   MulitGroupRaftManager *raft_manager = nullptr;
+  braft::Configuration peers;
+  braft::PeerId addr;
+  braft::GroupId group_id;
+  int32_t group_idx = INVALIED_GROUP_IDX;
+  std::string data_path = ".";
 };
 
 // Implement the simplest state machine as a raft group.
@@ -86,15 +92,15 @@ public:
   void on_start_following(const ::braft::LeaderChangeContext &ctx);
 
 private:
-  braft::Node *volatile _node;
+  std::unique_ptr<braft::Node> _node;
   MulitGroupRaftManager *_raft_manager = nullptr;
-  int32_t _group_id = INVALIED_GROUP_ID;
+  int32_t _group_id = INVALIED_GROUP_IDX;
   bool _is_leader = false;
 };
 
 struct MulitGroupRaftManagerOptions {
   // The number of groups.
-  int32_t group_count = INVALIED_GROUP_ID;
+  int32_t group_count = INVALIED_GROUP_IDX;
 };
 
 // Manage all the raft groups, limit all the leader on one node.
@@ -105,11 +111,20 @@ public:
   MulitGroupRaftManager(){};
   ~MulitGroupRaftManager() {}
 
-  void init(MulitGroupRaftManagerOptions &options) {
+  // Init all raft groups and start brpc service.
+  void init_and_start(MulitGroupRaftManagerOptions &options) {
     CHECK_GE(options.group_count, 0);
-    for (int32_t i = 0; i < options.group_count; ++i) {
+    auto server_ids = _config_manager.get_server_ids();
+    _server.reset(new brpc::Server());
+    for (int32_t idx = 0; idx < options.group_count; ++idx) {
+      
+
       SingleMachineOptions machine_options;
       machine_options.raft_manager = this;
+      machine_options.peers = _config_manager.get_config_at_index(idx);
+      machine_options.group_idx = idx;
+      machine_options.addr = server_ids[idx];
+      machine_options.group_id = _config_manager.get_group_id();
       _machines.emplace_back();
       _machines.back()->init(machine_options);
     }
@@ -128,7 +143,10 @@ private:
   // Change all the other group's leader to this node.
   bool _wait_for_coordinate = false;
   std::unique_ptr<SynchronizedCountClosure> _coordinate_clousure{nullptr};
+  std::unique_ptr<brpc::Server> _server{nullptr};
   std::atomic<size_t> _election_done_count{0};
+
+  ConfigurationManager _config_manager;
 };
 
 class MbraftServiceImpl : public MbraftService {
