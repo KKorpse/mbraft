@@ -19,7 +19,7 @@ if (NOT PROTOBUF_PROTOC_EXECUTABLE)
     set (PROTOBUF_PROTOC_EXECUTABLE "${PROTO_LIB_DIR}/../bin/protoc")
 endif()
 
-protobuf_generate_cpp(PROTO_SRC PROTO_HEADER mbraft.proto)
+protobuf_generate_cpp(PROTO_SRC PROTO_HEADER src/mbraft.proto)
 # include PROTO_HEADER
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
@@ -107,7 +107,9 @@ endif()
 include_directories(${LEVELDB_INCLUDE_PATH})
 include_directories(${CMAKE_SOURCE_DIR})
 
-add_executable(mbraft mbraft.cpp ${PROTO_SRC} ${PROTO_HEADER})
+file(GLOB_RECURSE MRAFT_SOURSE_STORAGE "${CMAKE_SOURCE_DIR}/src/*.cpp")
+
+add_executable(mbraft mbraft.cpp ${PROTO_SRC} ${PROTO_HEADER} ${MRAFT_SOURSE_STORAGE})
 
 set(DYNAMIC_LIB
     ${CMAKE_THREAD_LIBS_INIT}

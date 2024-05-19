@@ -1,9 +1,9 @@
-#include "multi_group_state_machine.h"
+#include "src/multi_group_state_machine.h"
 
 int main() {
   mbraft::MulitGroupRaftManager manager;
   mbraft::MulitGroupRaftManagerOptions options;
-  manager.init(options);
+  manager.init_and_start(options);
   return 0;
 }
 
