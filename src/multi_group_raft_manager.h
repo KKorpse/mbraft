@@ -14,6 +14,7 @@
 
 #include "config_manager.h"
 #include "mbraft.pb.h" // AppendEntriesRPC
+#include "single_state_machine.h"
 #include <atomic>
 #include <braft/configuration.h>
 #include <braft/protobuf_file.h> // braft::ProtoBufFile
@@ -29,6 +30,7 @@
 #include <gflags/gflags.h> // DEFINE_*
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 namespace mbraft {
 
@@ -62,42 +64,6 @@ private:
   std::condition_variable _cv;
 };
 
-class MulitGroupRaftManager;
-struct SingleMachineOptions {
-  MulitGroupRaftManager *raft_manager = nullptr;
-  braft::Configuration peers;
-  braft::PeerId addr;
-  braft::GroupId group_id;
-  int32_t group_idx = INVALIED_GROUP_IDX;
-  std::string data_path = ".";
-};
-
-// Implement the simplest state machine as a raft group.
-class SingleMachine : public braft::StateMachine {
-public:
-  void init(SingleMachineOptions &options);
-  bool is_leader() { return _is_leader; }
-  void change_leader_to(braft::PeerId to);
-  void request_leadership();
-
-  void on_apply(braft::Iterator &iter);
-  void on_snapshot_save(braft::SnapshotWriter *writer, braft::Closure *done);
-  int on_snapshot_load(braft::SnapshotReader *reader);
-  void on_leader_start(int64_t term);
-  void on_leader_stop(const butil::Status &status);
-  void on_shutdown();
-  void on_error(const ::braft::Error &e);
-  void on_configuration_committed(const ::braft::Configuration &conf);
-  void on_stop_following(const ::braft::LeaderChangeContext &ctx);
-  void on_start_following(const ::braft::LeaderChangeContext &ctx);
-
-private:
-  std::unique_ptr<braft::Node> _node;
-  MulitGroupRaftManager *_raft_manager = nullptr;
-  int32_t _group_id = INVALIED_GROUP_IDX;
-  bool _is_leader = false;
-};
-
 struct MulitGroupRaftManagerOptions {
   // The number of groups.
   int32_t group_count = INVALIED_GROUP_IDX;
@@ -107,46 +73,57 @@ struct MulitGroupRaftManagerOptions {
 class MulitGroupRaftManager {
   friend class SingleMachine;
 
+  enum GroupState {
+    ELECTION, // This group is in election, will do leader change after
+              // election done.
+    FOLLOWER, // This group's election is done before coordinating, need to
+              // trigger leader change.
+    LEADER_CHANGING, // already send leader change request.
+    LEADER           // No need to change leader.
+  };
+
+  enum ManagerState {
+    COORDINATING, // Coordinating leader change.
+    LEADING,      // This node is leader node.
+    NORMAL        // Normal state.
+  };
+
+  struct StateMachine {
+    StateMachine(SingleMachine *mch) {
+      CHECK(machine != nullptr);
+      machine.reset(mch);
+      state = FOLLOWER;
+    }
+    std::unique_ptr<SingleMachine> machine;
+    GroupState state;
+  };
+
 public:
   MulitGroupRaftManager(){};
   ~MulitGroupRaftManager() {}
 
   // Init all raft groups and start brpc service.
-  void init_and_start(MulitGroupRaftManagerOptions &options) {
-    CHECK_GE(options.group_count, 0);
-    auto server_ids = _config_manager.get_server_ids();
-    _server.reset(new brpc::Server());
-    for (int32_t idx = 0; idx < options.group_count; ++idx) {
-      
-
-      SingleMachineOptions machine_options;
-      machine_options.raft_manager = this;
-      machine_options.peers = _config_manager.get_config_at_index(idx);
-      machine_options.group_idx = idx;
-      machine_options.addr = server_ids[idx];
-      machine_options.group_id = _config_manager.get_group_id();
-      _machines.emplace_back();
-      _machines.back()->init(machine_options);
-    }
-  }
+  void init_and_start(MulitGroupRaftManagerOptions &options);
+  ManagerState state() { return _state; }
 
 private:
   void on_leader_start(int32_t group_id);
-  void on_start_following(int32_t group_id);
-  void coordinate_leader_if_need();
+  int on_start_following(int32_t group_id);
   static void *send_change_leader_req(void *machine);
 
 private:
-  std::vector<std::unique_ptr<SingleMachine>> _machines;
-
-  // When the _machines[0] becomes the leader of the group, set it to true
-  // Change all the other group's leader to this node.
-  bool _wait_for_coordinate = false;
-  std::unique_ptr<SynchronizedCountClosure> _coordinate_clousure{nullptr};
-  std::unique_ptr<brpc::Server> _server{nullptr};
-  std::atomic<size_t> _election_done_count{0};
-
+  std::vector<StateMachine> _machines;
   ConfigurationManager _config_manager;
+
+  // Coordination
+private:
+  int _start_leader_change(int32_t group_id);
+  bool _is_coordinating() { return _state == COORDINATING; }
+
+  ManagerState _state = NORMAL;
+  std::mutex _cood_mutex;
+  std::atomic<size_t> _needed_count{0}; // The number of groups need to be
+                                        // coordinated.
 };
 
 class MbraftServiceImpl : public MbraftService {
@@ -157,7 +134,13 @@ public:
                      ::google::protobuf::Closure *done) override {
     brpc::ClosureGuard done_guard(done);
     assert(_machine != nullptr);
-    _machine->change_leader_to(braft::PeerId(request->change_to()));
+    int res{0};
+
+    res = _machine->change_leader_to(braft::PeerId(request->change_to()));
+    response->set_success(res == 0);
+    if (res != 0) {
+      LOG(ERROR) << "Fail to change leader to " << request->change_to();
+    }
   }
 
 private:

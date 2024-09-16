@@ -1,4 +1,4 @@
-#include "src/multi_group_state_machine.h"
+#include "src/multi_group_raft_manager.h"
 
 int main() {
   mbraft::MulitGroupRaftManager manager;
