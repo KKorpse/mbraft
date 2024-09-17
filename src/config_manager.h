@@ -9,13 +9,14 @@
 #include <unordered_map>
 #include <vector>
 // Add for config
+#include <braft/configuration.h>
+#include <braft/log_entry.h>
+
 #include <fstream>
 #include <iostream>
 #include <string>
 
 #include "json.hpp"
-#include <braft/configuration.h>
-#include <braft/log_entry.h>
 
 namespace mbraft {
 
@@ -34,11 +35,9 @@ class Tuple;
      // 节点配置数量必须和 node number 一致
     "node_configs":[
         {
-            // 地址数量必须和 stream number 一致，可读取为字符串，用 braft::PeerId
-            解析
-            "name": "node1",
-             "adresses": ["127.0.0.1:8001", "127.0.0.1:8011"],
-"origin_priority": 1,
+            // 地址数量必须和 stream number 一致，可读取为字符串，用
+braft::PeerId 解析 "name": "node1", "adresses": ["127.0.0.1:8001",
+"127.0.0.1:8011"], "origin_priority": 1,
         },
         {
             "name": "node2",
@@ -55,181 +54,186 @@ class Tuple;
 */
 
 struct NodeConfiguration {
-  std::vector<braft::PeerId> addresses;
-  int64_t origin_priority;
+    std::vector<braft::PeerId> addresses;
+    int64_t origin_priority;
 };
 
 struct ConfigurationManagerOptions {
-  ConfigurationManagerOptions() = default;
-  ~ConfigurationManagerOptions() = default;
+    ConfigurationManagerOptions() = default;
+    ~ConfigurationManagerOptions() = default;
 
-  std::string config_file_path;
-  Database *db;
+    std::string config_file_path;
+    Database *db;
 };
 
 // Manager the history of configuration changing
 class ConfigurationManager {
-public:
-  ConfigurationManager() {}
-  ~ConfigurationManager() {}
+   public:
+    ConfigurationManager() {}
+    ~ConfigurationManager() {}
 
-  // 1. Set the configuration file path.
-  // 2. Load the configuration from the file.
-  // 3. Try to load the configuration from table in memory. (这个以后再实现)
-  butil::Status init(ConfigurationManagerOptions &&options);
+    // 1. Set the configuration file path.
+    // 2. Load the configuration from the file.
+    // 3. Try to load the configuration from table in memory. (这个以后再实现)
+    butil::Status init(ConfigurationManagerOptions &&options);
 
-  // load the configuration from the file. Initialize this class' member.
-  // the configuration from file has less origin_priority than the
-  // configuration from log storage.
-  // 1. used at the cluster bootstrap.
-  butil::Status load_config_from_file();
+    // load the configuration from the file. Initialize this class' member.
+    // the configuration from file has less origin_priority than the
+    // configuration from log storage.
+    // 1. used at the cluster bootstrap.
+    butil::Status load_config_from_file();
 
-  // load the configuration from the memory.
-  // there is a special table used to store the configuration.
-  // 1. get the configuration table,
-  // 2. read all the tuple from the table,
-  // 3. construct the configuration from the tuple.
-  void load_config_from_memory();
+    // load the configuration from the memory.
+    // there is a special table used to store the configuration.
+    // 1. get the configuration table,
+    // 2. read all the tuple from the table,
+    // 3. construct the configuration from the tuple.
+    void load_config_from_memory();
 
-  // For member change.
-  // Our member change strategy is single member change at a time, so the
-  // configure manager need to support single member change only.
-  // @ids: the size of ids must be the same as the number of streams. For each
-  //      id in is, must insert to each ClusterConfiguration.
-  // @retrun: If the size not right, duplicate ids or other error, return
-  //      false.
-  bool add_one_peer(std::string &name, NodeConfiguration &node_config);
-  bool remove_one_peer(std::string &name);
+    // For member change.
+    // Our member change strategy is single member change at a time, so the
+    // configure manager need to support single member change only.
+    // @ids: the size of ids must be the same as the number of streams. For each
+    //      id in is, must insert to each ClusterConfiguration.
+    // @retrun: If the size not right, duplicate ids or other error, return
+    //      false.
+    bool add_one_peer(std::string &name, NodeConfiguration &node_config);
+    bool remove_one_peer(std::string &name);
 
-  // Return the info of the configuration manager.
-  // eg. all the member of this class.
-  std::string to_string();
+    // Return the info of the configuration manager.
+    // eg. all the member of this class.
+    std::string to_string();
 
-  // Get the configuration at |index|
-  braft::Configuration get_config_at_index(int64_t index) const;
+    // Get the configuration at |index|
+    braft::Configuration get_config_at_index(int64_t index) const;
 
-  int64_t get_stream_nums() const { return _stream_number; }
+    int64_t get_stream_nums() const { return _stream_number; }
 
-  int64_t get_node_number() const { return _node_number; }
+    int64_t get_node_number() const { return _node_number; }
 
-  braft::GroupId get_group_id() const { return _group_id; }
+    braft::GroupId get_group_id() const { return _group_id; }
 
-  std::string get_name() const { return _name; }
+    std::string get_name() const { return _name; }
 
-  bool check_if_exist_in_config(std::string &name) {
-    return _node_configs.count(name) != 0;
-  }
-
-  std::string check_delta_config(std::vector<std::string> new_names) {
-    for (auto it : _node_configs) {
-      if (std::find(new_names.begin(), new_names.end(), it.first) ==
-          new_names.end()) {
-        return it.first;
-      }
+    bool check_if_exist_in_config(std::string &name) {
+        return _node_configs.count(name) != 0;
     }
-    return "";
-  }
 
-  // Get the server ids of current node.
-  // Each stream has a server id.
-  std::vector<braft::PeerId> get_server_ids() const {
-    LOG(INFO) << "get_server_ids: " << _node_configs.at(_name).addresses.size();
-    return _node_configs.at(_name).addresses;
-  }
-
-  std::string get_serialized_config();
-
-  // Used to get the server ids of other nodes.
-  // To update LogStream's leader_id.
-  // Any better way?
-  std::vector<braft::PeerId> get_server_ids_by_name(std::string name) const {
-    LOG(INFO) << "get_server_ids: " << _node_configs.at(name).addresses.size();
-    return _node_configs.at(name).addresses;
-  }
-
-  std::vector<std::string>
-  get_server_ids_by_name_in_str(std::string name) const {
-    std::vector<std::string> addr_str;
-    for (auto iter : _node_configs.at(name).addresses) {
-      addr_str.push_back(iter.to_string());
+    std::string check_delta_config(std::vector<std::string> new_names) {
+        for (auto it : _node_configs) {
+            if (std::find(new_names.begin(), new_names.end(), it.first) ==
+                new_names.end()) {
+                return it.first;
+            }
+        }
+        return "";
     }
-    return addr_str;
-  }
 
-  std::vector<braft::PeerId> get_server_ids_of_election() {
-    std::vector<braft::PeerId> election_peers;
-    for (auto iter : _node_configs) {
-      election_peers.push_back(iter.second.addresses.at(0));
+    // Get the server ids of current node.
+    // Each stream has a server id.
+    std::vector<braft::PeerId> get_server_ids() const {
+        LOG(INFO) << "get_server_ids: "
+                  << _node_configs.at(_name).addresses.size();
+        return _node_configs.at(_name).addresses;
     }
-    return election_peers;
-  }
 
-  std::unordered_map<std::string, braft::PeerId> get_server_name_id_map_of_election() {
-    std::unordered_map<std::string, braft::PeerId> name_id_map;
-    for (auto iter : _node_configs) {
-      name_id_map[iter.first] = iter.second.addresses.at(0);
+    std::string get_serialized_config();
+
+    // Used to get the server ids of other nodes.
+    // To update LogStream's leader_id.
+    // Any better way?
+    std::vector<braft::PeerId> get_server_ids_by_name(std::string name) const {
+        LOG(INFO) << "get_server_ids: "
+                  << _node_configs.at(name).addresses.size();
+        return _node_configs.at(name).addresses;
     }
-    return name_id_map;
-  }
 
-  std::vector<braft::PeerId> get_all_server_ids() {
-    std::vector<braft::PeerId> all_peers;
-    for (auto iter : _node_configs) {
-      for (auto peer : iter.second.addresses) {
-        all_peers.push_back(peer);
-      }
+    std::vector<std::string> get_server_ids_by_name_in_str(
+        std::string name) const {
+        std::vector<std::string> addr_str;
+        for (auto iter : _node_configs.at(name).addresses) {
+            addr_str.push_back(iter.to_string());
+        }
+        return addr_str;
     }
-    return all_peers;
-  }
 
-  int64_t get_priority_by_name(std::string name) const {
-    return _node_configs.at(name).origin_priority;
-  }
-
-  std::vector<braft::PeerId> get_all_leader_id_by_peer_id(braft::PeerId peer_id) {
-    for (auto iter : _node_configs) {
-      if (std::find(iter.second.addresses.begin(), iter.second.addresses.end(),
-                    peer_id) != iter.second.addresses.end()) {
-        return iter.second.addresses;
-      }
+    std::vector<braft::PeerId> get_server_ids_of_election() {
+        std::vector<braft::PeerId> election_peers;
+        for (auto iter : _node_configs) {
+            election_peers.push_back(iter.second.addresses.at(0));
+        }
+        return election_peers;
     }
-    LOG(ERROR) << "didn't find leader id!";
-    return std::vector<braft::PeerId>{};
-  }
 
-  bool check_address(const std::string address) {
-    if (braft::PeerId().parse(address) == -1) {
-      return false;
+    std::unordered_map<std::string, braft::PeerId>
+    get_server_name_id_map_of_election() {
+        std::unordered_map<std::string, braft::PeerId> name_id_map;
+        for (auto iter : _node_configs) {
+            name_id_map[iter.first] = iter.second.addresses.at(0);
+        }
+        return name_id_map;
     }
-    return true;
-  }
 
-  // const ConfigurationEntry& last_configuration() const;
-private:
-  // Load config from code file, only used for test.
-  void _load_default_config();
+    std::vector<braft::PeerId> get_all_server_ids() {
+        std::vector<braft::PeerId> all_peers;
+        for (auto iter : _node_configs) {
+            for (auto peer : iter.second.addresses) {
+                all_peers.push_back(peer);
+            }
+        }
+        return all_peers;
+    }
 
-private:
-  std::string _name;         // name of current node
-  int64_t _node_number{0};   // number of nodes in cluster
-  int64_t _stream_number{0}; // number of log streams
-  braft::GroupId _group_id;         // cluster common id
+    int64_t get_priority_by_name(std::string name) const {
+        return _node_configs.at(name).origin_priority;
+    }
 
-  // configurations of all nodes
-  std::unordered_map<std::string, // name
-                     NodeConfiguration>
-      _node_configs;
+    std::vector<braft::PeerId> get_all_leader_id_by_peer_id(
+        braft::PeerId peer_id) {
+        for (auto iter : _node_configs) {
+            if (std::find(iter.second.addresses.begin(),
+                          iter.second.addresses.end(),
+                          peer_id) != iter.second.addresses.end()) {
+                return iter.second.addresses;
+            }
+        }
+        LOG(ERROR) << "didn't find leader id!";
+        return std::vector<braft::PeerId>{};
+    }
 
-  // Each ClusterConfiguration is a set of peers' endpoints.
-  // For each stream there is a ClusterConfiguration.
-  // So the size of _configurations is the same as the number of streams.
-  // std::vector<std::unique_ptr<ClusterConfiguration>> _configurations;
+    bool check_address(const std::string address) {
+        if (braft::PeerId().parse(address) == -1) {
+            return false;
+        }
+        return true;
+    }
 
-  // The configuration file path.
-  std::string _config_file_path;
+    // const ConfigurationEntry& last_configuration() const;
+   private:
+    // Load config from code file, only used for test.
+    void _load_default_config();
 
-  // Used to implement the load_config_from_memory() func.
-  Database *_db;
+   private:
+    std::string _name;          // name of current node
+    int64_t _node_number{0};    // number of nodes in cluster
+    int64_t _stream_number{0};  // number of log streams
+    braft::GroupId _group_id;   // cluster common id
+
+    // configurations of all nodes
+    std::unordered_map<std::string,  // name
+                       NodeConfiguration>
+        _node_configs;
+
+    // Each ClusterConfiguration is a set of peers' endpoints.
+    // For each stream there is a ClusterConfiguration.
+    // So the size of _configurations is the same as the number of streams.
+    // std::vector<std::unique_ptr<ClusterConfiguration>> _configurations;
+
+    // The configuration file path.
+    std::string _config_file_path;
+
+    // Used to implement the load_config_from_memory() func.
+    Database *_db;
 };
 
-} // namespace mraft
+}  // namespace mbraft

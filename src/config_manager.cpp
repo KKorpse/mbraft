@@ -1,11 +1,10 @@
-#include "config_manager.h"
-
+#include <braft/configuration.h>
 #include <butil/logging.h>
 #include <gflags/gflags.h>
 
 #include <string>
 
-#include <braft/configuration.h>
+#include "config_manager.h"
 
 namespace mbraft {
 
@@ -206,4 +205,4 @@ std::string ConfigurationManager::get_serialized_config() {
     return config.dump();
 }
 
-}  // namespace mraft
+}  // namespace mbraft

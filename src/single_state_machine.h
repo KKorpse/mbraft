@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "config_manager.h"
-#include "mbraft.pb.h" // AppendEntriesRPC
-#include <atomic>
 #include <braft/configuration.h>
-#include <braft/protobuf_file.h> // braft::ProtoBufFile
-#include <braft/raft.h>          // braft::Node braft::StateMachine
-#include <braft/storage.h>       // braft::SnapshotWriter
-#include <braft/util.h>          // braft::AsyncClosureGuard
-#include <brpc/controller.h>     // brpc::Controller
-#include <brpc/server.h>         // brpc::Server
+#include <braft/protobuf_file.h>  // braft::ProtoBufFile
+#include <braft/raft.h>           // braft::Node braft::StateMachine
+#include <braft/storage.h>        // braft::SnapshotWriter
+#include <braft/util.h>           // braft::AsyncClosureGuard
+#include <brpc/controller.h>      // brpc::Controller
+#include <brpc/server.h>          // brpc::Server
+#include <gflags/gflags.h>        // DEFINE_*
+
+#include <atomic>
 #include <cassert>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <gflags/gflags.h> // DEFINE_*
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include "config_manager.h"
+#include "mbraft.pb.h"  // AppendEntriesRPC
 
 namespace mbraft {
 
@@ -38,39 +40,43 @@ namespace mbraft {
 
 class MulitGroupRaftManager;
 struct SingleMachineOptions {
-  MulitGroupRaftManager *raft_manager = nullptr;
-  braft::Configuration peers;
-  braft::PeerId addr;
-  braft::GroupId group_id;
-  int32_t group_idx = INVALIED_GROUP_IDX;
-  std::string data_path = ".";
+    MulitGroupRaftManager *raft_manager = nullptr;
+    braft::Configuration peers;
+    braft::PeerId addr;
+    braft::GroupId group_id;
+    int32_t group_idx = INVALIED_GROUP_IDX;
+    std::string data_path = ".";
 };
 
 // Implement the simplest state machine as a raft group.
 class SingleMachine : public braft::StateMachine {
-public:
-  void init(SingleMachineOptions &options);
-  bool is_leader() { return _is_leader; }
-  int change_leader_to(braft::PeerId to);
-  int request_leadership();
+   public:
+    void init(SingleMachineOptions &options);
+    bool is_leader() { return _is_leader; }
+    int change_leader_to(braft::PeerId to);
+    int request_leadership();
 
-  void on_apply(braft::Iterator &iter) override;
-  void on_snapshot_save(braft::SnapshotWriter *writer,
-                        braft::Closure *done) override;
-  int on_snapshot_load(braft::SnapshotReader *reader) override;
-  void on_leader_start(int64_t term) override;
-  void on_leader_stop(const butil::Status &status) override;
-  void on_shutdown() override;
-  void on_error(const ::braft::Error &e) override;
-  void on_configuration_committed(const ::braft::Configuration &conf) override;
-  void on_stop_following(const ::braft::LeaderChangeContext &ctx) override;
-  void on_start_following(const ::braft::LeaderChangeContext &ctx) override;
+    void on_apply(braft::Iterator &iter) override;
+    void on_snapshot_save(braft::SnapshotWriter *writer,
+                          braft::Closure *done) override;
+    int on_snapshot_load(braft::SnapshotReader *reader) override;
+    void on_leader_start(int64_t term) override;
+    void on_leader_stop(const butil::Status &status) override;
+    void on_shutdown() override;
+    void on_error(const ::braft::Error &e) override;
+    void on_configuration_committed(
+        const ::braft::Configuration &conf) override;
+    void on_stop_following(const ::braft::LeaderChangeContext &ctx) override;
+    void on_start_following(const ::braft::LeaderChangeContext &ctx) override;
 
-private:
-  std::unique_ptr<braft::Node> _node;
-  MulitGroupRaftManager *_raft_manager = nullptr;
-  int32_t _group_id = INVALIED_GROUP_IDX;
-  bool _is_leader = false;
+   private:
+    int start_servic();
+
+   private:
+    std::unique_ptr<braft::Node> _node;
+    MulitGroupRaftManager *_raft_manager = nullptr;
+    int32_t _group_id = INVALIED_GROUP_IDX;
+    bool _is_leader = false;
 };
 
-} // namespace mbraft
+}  // namespace mbraft
