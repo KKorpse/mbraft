@@ -42,7 +42,7 @@ class MulitGroupRaftManager;
 struct SingleMachineOptions {
     MulitGroupRaftManager *raft_manager = nullptr;
     braft::Configuration peers;
-    braft::PeerId addr;
+    braft::PeerId peer_id;
     braft::GroupId group_id;
     int32_t group_idx = INVALIED_GROUP_IDX;
     std::string data_path = ".";
@@ -51,7 +51,7 @@ struct SingleMachineOptions {
 // Implement the simplest state machine as a raft group.
 class SingleMachine : public braft::StateMachine {
    public:
-    void init(SingleMachineOptions &options);
+    int init(SingleMachineOptions &options);
     bool is_leader() { return _is_leader; }
     int change_leader_to(braft::PeerId to);
     int request_leadership();
@@ -75,8 +75,10 @@ class SingleMachine : public braft::StateMachine {
    private:
     std::unique_ptr<braft::Node> _node;
     MulitGroupRaftManager *_raft_manager = nullptr;
-    int32_t _group_id = INVALIED_GROUP_IDX;
+    int32_t _group_idx = INVALIED_GROUP_IDX;
+    braft::PeerId _peer_id;
     bool _is_leader = false;
+    std::unique_ptr<brpc::Server> _server;
 };
 
 }  // namespace mbraft

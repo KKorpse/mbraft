@@ -69,6 +69,14 @@ class SynchronizedCountClosure : public braft::Closure {
 struct MulitGroupRaftManagerOptions {
     // The number of groups.
     int32_t group_count = INVALIED_GROUP_IDX;
+
+    // Addr of each group on this node.
+    std::vector<braft::PeerId> server_ids;
+
+    // Peers of each group.
+    std::vector<braft::Configuration> configs;
+
+    std::string name;
 };
 
 // Manage all the raft groups, limit all the leader on one node.
@@ -108,19 +116,24 @@ class MulitGroupRaftManager {
     void init_and_start(MulitGroupRaftManagerOptions &options);
     ManagerState state() { return _state; }
 
+    // group_idx: the index of the group in the _machines.
+    // conf: the new configuration of the group.
+    int split_raft_group(int32_t group_idx, braft::Configuration &conf);
+
    private:
-    void on_leader_start(int32_t group_id);
-    int on_start_following(int32_t group_id);
-    int on_leader_stop(int32_t group_id);
+    void on_leader_start(int32_t group_idx);
+    int on_start_following(int32_t group_idx);
+    int on_leader_stop(int32_t group_idx);
     static void *send_change_leader_req(void *machine);
 
    private:
     std::vector<StateMachine> _machines;
     ConfigurationManager _config_manager;
+    std::string _name;
 
     // Coordination
    private:
-    int _start_leader_change(int32_t group_id);
+    int _start_leader_change(int32_t group_idx);
     bool _is_coordinating() { return _state == COORDINATING; }
 
     ManagerState _state = NORMAL;
@@ -129,21 +142,25 @@ class MulitGroupRaftManager {
                                            // coordinated.
 };
 
-class MbraftServiceImpl : public MbraftService {
+class SingleMachineServiceImpl : public SingleMachineService {
    public:
+    explicit SingleMachineServiceImpl(SingleMachine *machine) : _machine(machine) {}
     void leader_change(::google::protobuf::RpcController *controller,
                        const LeaderChangeRequest *request,
                        LeaderChangeResponse *response,
                        ::google::protobuf::Closure *done) override {
         brpc::ClosureGuard done_guard(done);
-        assert(_machine != nullptr);
-        int res{0};
+        CHECK(_machine != nullptr);
 
+        LOG(INFO) << "Receive leader change request to "
+                  << request->change_to();
+        int res{0};
         res = _machine->change_leader_to(braft::PeerId(request->change_to()));
-        response->set_success(res == 0);
         if (res != 0) {
-            LOG(ERROR) << "Fail to change leader to " << request->change_to();
+            LOG(ERROR) << "Fail to change leader to " << request->change_to()
+                       << " res: " << res;
         }
+        response->set_res(res);
     }
 
    private:

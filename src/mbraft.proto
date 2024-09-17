@@ -7,9 +7,33 @@ message LeaderChangeRequest {
 };
 
 message LeaderChangeResponse {
-    optional bool success = 1;
+    optional int32 res = 1;
 };
 
-service MbraftService {
+message SplitRequest {
+    required int32 group_id = 1;
+    required string new_peers = 2;
+};
+
+message SplitResponse {
+    optional int32 res = 1;
+};
+
+message MergeRequest {
+    required int32 target_group_id = 1;
+    required int32 source_group_id = 2;
+};
+
+message MergeResponse {
+    optional int32 res = 1;
+};
+
+service SingleMachineService {
     rpc leader_change(LeaderChangeRequest) returns (LeaderChangeResponse);
+};
+
+
+service MultiRaftManagerService {
+    rpc split_group(SplitRequest) returns (SplitResponse);
+    rpc merge_group(MergeRequest) returns (MergeResponse);
 };

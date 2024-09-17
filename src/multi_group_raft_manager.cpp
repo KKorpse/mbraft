@@ -30,18 +30,24 @@
 #include "mbraft.pb.h"
 #include "multi_group_raft_manager.h"
 
+#define LOG_WITH_NAME(level) \
+    LOG(level) << "[" << _name << "] "
+
 namespace mbraft {
 // TODO:
 void MulitGroupRaftManager::init_and_start(
     MulitGroupRaftManagerOptions &options) {
     CHECK_GE(options.group_count, 0);
-    auto server_ids = _config_manager.get_server_ids();
+    CHECK_EQ(options.group_count, options.configs.size());
+    CHECK_EQ(options.group_count, options.server_ids.size());
+    _name = options.name;
+    
     for (int32_t idx = 0; idx < options.group_count; ++idx) {
         SingleMachineOptions machine_options;
         machine_options.raft_manager = this;
-        machine_options.peers = _config_manager.get_config_at_index(idx);
+        machine_options.peers = options.configs[idx];
         machine_options.group_idx = idx;
-        machine_options.addr = server_ids[idx];
+        machine_options.peer_id = options.server_ids[idx];
         machine_options.group_id = _config_manager.get_group_id();
         _machines.emplace_back(new SingleMachine);
         _machines.back().machine->init(machine_options);
@@ -55,23 +61,23 @@ void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
     return nullptr;
 }
 
-void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
+void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
     std::lock_guard<std::mutex> lock(_cood_mutex);
-    _machines[group_id].state = LEADER;
-    if (group_id == 0) {
+    _machines[group_idx].state = LEADER;
+    if (group_idx == 0) {
         // We do not deal with unexpecttable leader change, we assume that the
         // net work and all nodes are stable. So the leader change only happens
         // when we kill a node on purpose. Which means the all the group only
         // change leader once at a time.
         if (_is_coordinating()) {
-            LOG(ERROR)
+            LOG_WITH_NAME(ERROR)
                 << "Leader change during coordinate leader, this should not "
                    "happen when testing.";
             return;
         }
 
         // Start to coordinate leader.
-        LOG(INFO) << "FLAG: Start to coordinate leader.";
+        LOG_WITH_NAME(INFO) << "FLAG: Start to coordinate leader.";
         _state = COORDINATING;
         _needed_count = 0;
         for (auto &machine : _machines) {
@@ -80,19 +86,19 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
             }
             ++_needed_count;
             if (machine.state == FOLLOWER) {
-                CHECK_EQ(_start_leader_change(group_id), 0)
+                CHECK_EQ(_start_leader_change(group_idx), 0)
                     << "Fail to start leader "
                        "change.";
             }
         }
 
     } else {
-        LOG(INFO) << "Group " << group_id << " starts to be leader.";
+        LOG_WITH_NAME(INFO) << "Group " << group_idx << " starts to be leader.";
         if (!_is_coordinating()) {
             // 1. The coordinating is not start yet.
             // 2. or this node is not coordinating node. (The group[0]'s leader
             // node).
-            LOG(INFO)
+            LOG_WITH_NAME(INFO)
                 << "group election down, but Not in coordinating or this node "
                    "is not coordinating node.";
             return;
@@ -103,26 +109,26 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_id) {
             << "The needed count should be greater than 0.";
         --_needed_count;
         if (_needed_count == 0) {
-            LOG(INFO) << "FLAG: All group election done, finish coordinating.";
+            LOG_WITH_NAME(INFO) << "FLAG: All group election done, finish coordinating.";
             _state = LEADING;
         }
     }
 }
 
-int MulitGroupRaftManager::on_start_following(int32_t group_id) {
-    if ((size_t)group_id >= _machines.size()) {
-        LOG(ERROR) << "Invalid group id: " << group_id;
+int MulitGroupRaftManager::on_start_following(int32_t group_idx) {
+    if ((size_t)group_idx >= _machines.size()) {
+        LOG_WITH_NAME(ERROR) << "Invalid group id: " << group_idx;
         return -1;
     }
 
     std::lock_guard<std::mutex> lock(_cood_mutex);
-    _machines[group_id].state = FOLLOWER;
+    _machines[group_idx].state = FOLLOWER;
 
     if (!_is_coordinating()) {
         // 1. The coordinating is not start yet.
         // 2. or this node is not coordinating node. (The group[0]'s leader
         // node).
-        LOG(INFO)
+        LOG_WITH_NAME(INFO)
             << "group election down, but Not in coordinating or this node "
                "is not coordinating node.";
         return -1;
@@ -130,7 +136,7 @@ int MulitGroupRaftManager::on_start_following(int32_t group_id) {
     } else {
         // Coordinating is in progress, so we need to change leader to this
         // node.
-        return _start_leader_change(group_id);
+        return _start_leader_change(group_idx);
     }
 }
 
@@ -140,7 +146,7 @@ int MulitGroupRaftManager::_start_leader_change(int32_t group_id) {
     auto res = bthread_start_background(&tid, NULL, send_change_leader_req,
                                         _machines[group_id].machine.get());
     if (res != 0) {
-        LOG(ERROR) << "Fail to start bthread, res: " << res;
+        LOG_WITH_NAME(ERROR) << "Fail to start bthread, res: " << res;
         return res;
     }
     _machines[group_id].state = LEADER_CHANGING;

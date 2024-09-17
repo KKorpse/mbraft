@@ -30,13 +30,34 @@
 
 namespace mbraft {
 
+#define LOG_WITH_PEER_ID(level) \
+    LOG(level) << "[" << _group_idx << ": " << _peer_id.to_string() << "] "
+
 DEFINE_int32(
     election_timeout_ms, 5000,
     "Start election in such milliseconds if disconnect with the leader");
-DEFINE_int32(snapshot_interval, 7200, "Interval between each snapshot");
+DEFINE_int32(snapshot_interval, 72000, "Interval between each snapshot");
 
-void SingleMachine::init(SingleMachineOptions &options) {
+int SingleMachine::init(SingleMachineOptions &options) {
     CHECK(options.raft_manager != nullptr);
+
+    // 1. Init Server
+    _server.reset(new brpc::Server());
+
+    auto service = new SingleMachineServiceImpl(this);
+    _server->AddService(service, brpc::SERVER_OWNS_SERVICE);
+
+    if (braft::add_service(_server.get(), options.peer_id.addr) != 0) {
+        LOG_WITH_PEER_ID(ERROR) << "Fail to add raft service";
+        return -1;
+    }
+
+    if (_server->Start(options.peer_id.addr, NULL) != 0) {
+        LOG_WITH_PEER_ID(ERROR) << "Fail to start Server";
+        return -1;
+    }
+
+    // 2. Init Raft Node
     _raft_manager = options.raft_manager;
 
     braft::NodeOptions node_options;
@@ -46,40 +67,45 @@ void SingleMachine::init(SingleMachineOptions &options) {
     node_options.node_owns_fsm = false;
     node_options.snapshot_interval_s = FLAGS_snapshot_interval;
     std::string prefix = "local://" + options.data_path;
-    node_options.log_uri = prefix + "/log";
+    node_options.log_uri = prefix + "/LOG_WITH_PEER_ID";
     node_options.raft_meta_uri = prefix + "/raft_meta";
     node_options.snapshot_uri = prefix + "/snapshot";
-    _node.reset(new braft::Node(options.group_id, options.addr));
+    _node.reset(new braft::Node(options.group_id, options.peer_id));
     if (_node->init(node_options) != 0) {
-        LOG(ERROR) << "Fail to init raft node";
+        LOG_WITH_PEER_ID(ERROR) << "Fail to init raft node";
         _node.reset(nullptr);
+        return -1;
     }
+
+    return 0;
 }
 
 void SingleMachine::on_apply(braft::Iterator &iter) {
     for (; iter.valid(); iter.next()) {
         braft::AsyncClosureGuard closure_guard(iter.done());
 
-        LOG(INFO) << "Node " << _node->node_id() << " Apply log at index "
-                  << iter.index();
+        LOG_WITH_PEER_ID(INFO)
+            << "Node " << _node->node_id()
+            << " Apply LOG_WITH_PEER_ID at index " << iter.index();
     }
 }
 
 void SingleMachine::on_snapshot_save(braft::SnapshotWriter *writer,
                                      braft::Closure *done) {
-    LOG(ERROR) << "Snapshot save not implemented";
+    LOG_WITH_PEER_ID(ERROR) << "Snapshot save not implemented";
     braft::AsyncClosureGuard closure_guard(done);
 }
 
 int SingleMachine::on_snapshot_load(braft::SnapshotReader *reader) {
-    LOG(ERROR) << "Snapshot load not implemented";
+    LOG_WITH_PEER_ID(ERROR) << "Snapshot load not implemented";
     return -1;
 }
 
 int SingleMachine::change_leader_to(braft::PeerId to) {
     int res = _node->transfer_leadership_to(to);
     if (res != 0) {
-        LOG(ERROR) << "Fail to transfer leader to " << to.to_string();
+        LOG_WITH_PEER_ID(ERROR)
+            << "Fail to transfer leader to " << to.to_string();
         return res;
     }
     return 0;
@@ -104,21 +130,22 @@ int SingleMachine::request_leadership() {
     channel_opt.timeout_ms = -1;  // We don't need RPC timeout
     res = channel.Init(leader.addr, &channel_opt);
     if (res != 0) {
-        LOG(ERROR) << "Fail to init sending channel: "
-                   << _node->node_id().peer_id.to_string() << " to "
-                   << leader.to_string();
+        LOG_WITH_PEER_ID(ERROR) << "Fail to init sending channel: "
+                                << _node->node_id().peer_id.to_string()
+                                << " to " << leader.to_string();
         return res;
     }
 
-    MbraftService_Stub leader_stub(&channel);
-    LOG(WARNING) << _node->node_id().peer_id.to_string()
-                 << " Request leadership from " << leader.to_string();
-    // TODO: impl of leader_change
+    SingleMachineService_Stub leader_stub(&channel);
+    LOG_WITH_PEER_ID(WARNING)
+        << _node->node_id().peer_id.to_string() << " Request leadership from "
+        << leader.to_string();
     leader_stub.leader_change(cntl.get(), request.get(), response.get(),
                               nullptr);
     if (cntl->Failed()) {
-        LOG(ERROR) << "Fail to request leadership from " << leader.to_string()
-                   << " : " << cntl->ErrorText();
+        LOG_WITH_PEER_ID(ERROR)
+            << "Fail to request leadership from " << leader.to_string() << " : "
+            << cntl->ErrorText();
         return -1;
     }
 
@@ -126,38 +153,41 @@ int SingleMachine::request_leadership() {
 }
 
 void SingleMachine::on_leader_start(int64_t term) {
-    LOG(INFO) << "Node " << _node->node_id() << " starts to be leader";
+    LOG_WITH_PEER_ID(INFO) << "Node " << _node->node_id()
+                           << " starts to be leader";
     assert(_raft_manager != nullptr);
     _is_leader = true;
-    _raft_manager->on_leader_start(_group_id);
+    _raft_manager->on_leader_start(_group_idx);
 }
 
 void SingleMachine::on_leader_stop(const butil::Status &status) {
-    LOG(INFO) << "Node " << _node->node_id() << " stops to be leader";
+    LOG_WITH_PEER_ID(INFO) << "Node " << _node->node_id()
+                           << " stops to be leader";
     _is_leader = false;
-    _raft_manager->on_leader_stop(_group_id);
+    _raft_manager->on_leader_stop(_group_idx);
 }
 
 void SingleMachine::on_shutdown() {
-    LOG(INFO) << "Node " << _node->node_id() << " shutdown";
+    LOG_WITH_PEER_ID(INFO) << "Node " << _node->node_id() << " shutdown";
 }
 
 void SingleMachine::on_error(const ::braft::Error &e) {
-    LOG(ERROR) << "Node " << _node->node_id() << " error: " << e;
+    LOG_WITH_PEER_ID(ERROR) << "Node " << _node->node_id() << " error: " << e;
 }
 void SingleMachine::on_configuration_committed(
     const ::braft::Configuration &conf) {
-    LOG(ERROR) << "Configuration committed not implemented";
+    LOG_WITH_PEER_ID(ERROR) << "Configuration committed not implemented";
 }
 
 void SingleMachine::on_stop_following(const ::braft::LeaderChangeContext &ctx) {
-    LOG(INFO) << "Node " << _node->node_id() << " stops following " << ctx;
+    LOG_WITH_PEER_ID(INFO) << "Node " << _node->node_id() << " stops following "
+                           << ctx;
 }
 
 void SingleMachine::on_start_following(
     const ::braft::LeaderChangeContext &ctx) {
     assert(_raft_manager != nullptr);
-    _raft_manager->on_start_following(_group_id);
+    _raft_manager->on_start_following(_group_idx);
 }
 
 }  // namespace mbraft
