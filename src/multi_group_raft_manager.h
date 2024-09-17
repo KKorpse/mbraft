@@ -39,33 +39,6 @@ namespace mbraft {
 #define INVALIED_GROUP_IDX -1
 #define INVALID_LEADER_COUNT -1
 
-class SynchronizedCountClosure : public braft::Closure {
-   public:
-    explicit SynchronizedCountClosure(int num_signal) : _count(num_signal) {}
-
-    void Run() override {
-        std::lock_guard<std::mutex> lock(_mutex);
-        if (--_count <= 0) {
-            _cv.notify_all();
-        }
-    }
-
-    void wait() {
-        std::unique_lock<std::mutex> lock(_mutex);
-        _cv.wait(lock, [this] { return _count <= 0; });
-    }
-
-    void reset(int num_signal) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        _count = num_signal;
-    }
-
-   private:
-    int _count;
-    std::mutex _mutex;
-    std::condition_variable _cv;
-};
-
 struct MulitGroupRaftManagerOptions {
     // The number of groups.
     int32_t group_count = INVALIED_GROUP_IDX;
@@ -118,7 +91,22 @@ class MulitGroupRaftManager {
 
     // group_idx: the index of the group in the _machines.
     // conf: the new configuration of the group.
-    int split_raft_group(int32_t group_idx, braft::Configuration &conf);
+    int split_raft_group(int32_t group_idx, braft::Configuration &conf,
+                         NewConfiguration &new_conf) {
+        CHECK_LT(group_idx, _machines.size());
+        if (!_is_coordinating()) {
+            LOG(ERROR) << "This node is not coordinating leader change.";
+            return -1;
+        }
+        if (!_is_all_leader_on_this_node()) {
+            LOG(ERROR) << "All leader should be on this "
+                          "node when split group.";
+            return -1;
+        }
+        
+
+        return 0;
+    }
 
    private:
     void on_leader_start(int32_t group_idx);
@@ -135,6 +123,7 @@ class MulitGroupRaftManager {
    private:
     int _start_leader_change(int32_t group_idx);
     bool _is_coordinating() { return _state == COORDINATING; }
+    bool _is_all_leader_on_this_node();
 
     ManagerState _state = NORMAL;
     std::mutex _cood_mutex;
@@ -144,7 +133,8 @@ class MulitGroupRaftManager {
 
 class SingleMachineServiceImpl : public SingleMachineService {
    public:
-    explicit SingleMachineServiceImpl(SingleMachine *machine) : _machine(machine) {}
+    explicit SingleMachineServiceImpl(SingleMachine *machine)
+        : _machine(machine) {}
     void leader_change(::google::protobuf::RpcController *controller,
                        const LeaderChangeRequest *request,
                        LeaderChangeResponse *response,

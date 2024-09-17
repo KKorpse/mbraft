@@ -30,8 +30,7 @@
 #include "mbraft.pb.h"
 #include "multi_group_raft_manager.h"
 
-#define LOG_WITH_NAME(level) \
-    LOG(level) << "[" << _name << "] "
+#define LOG_WITH_NAME(level) LOG(level) << "[" << _name << "] "
 
 namespace mbraft {
 // TODO:
@@ -41,7 +40,7 @@ void MulitGroupRaftManager::init_and_start(
     CHECK_EQ(options.group_count, options.configs.size());
     CHECK_EQ(options.group_count, options.server_ids.size());
     _name = options.name;
-    
+
     for (int32_t idx = 0; idx < options.group_count; ++idx) {
         SingleMachineOptions machine_options;
         machine_options.raft_manager = this;
@@ -109,7 +108,8 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
             << "The needed count should be greater than 0.";
         --_needed_count;
         if (_needed_count == 0) {
-            LOG_WITH_NAME(INFO) << "FLAG: All group election done, finish coordinating.";
+            LOG_WITH_NAME(INFO)
+                << "FLAG: All group election done, finish coordinating.";
             _state = LEADING;
         }
     }
@@ -140,23 +140,32 @@ int MulitGroupRaftManager::on_start_following(int32_t group_idx) {
     }
 }
 
-int MulitGroupRaftManager::_start_leader_change(int32_t group_id) {
-    CHECK_LT(group_id, _machines.size());
+int MulitGroupRaftManager::_start_leader_change(int32_t group_idx) {
+    CHECK_LT(group_idx, _machines.size());
     bthread_t tid;
     auto res = bthread_start_background(&tid, NULL, send_change_leader_req,
-                                        _machines[group_id].machine.get());
+                                        _machines[group_idx].machine.get());
     if (res != 0) {
         LOG_WITH_NAME(ERROR) << "Fail to start bthread, res: " << res;
         return res;
     }
-    _machines[group_id].state = LEADER_CHANGING;
+    _machines[group_idx].state = LEADER_CHANGING;
 
     return 0;
 }
 
-int MulitGroupRaftManager::on_leader_stop(int32_t group_id) {
-    CHECK_LT(group_id, _machines.size());
-    _machines[group_id].state = ELECTION;
+int MulitGroupRaftManager::on_leader_stop(int32_t group_idx) {
+    CHECK_LT(group_idx, _machines.size());
+    _machines[group_idx].state = ELECTION;
     return 0;
+}
+
+bool MulitGroupRaftManager::_is_all_leader_on_this_node() {
+    for (auto &machine : _machines) {
+        if (machine.state != LEADER) {
+            return false;
+        }
+    }
+    return true;
 }
 }  // namespace mbraft

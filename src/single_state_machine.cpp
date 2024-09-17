@@ -80,9 +80,36 @@ int SingleMachine::init(SingleMachineOptions &options) {
     return 0;
 }
 
+int SingleMachine::append_split_log(NewConfiguration &new_conf,
+                                    braft::Closure *done) {
+    std::string data = new_conf.serialize();
+    UpperLog upper_log(UpperLog::LogType::SPLIT, data);
+    int res = append_task(upper_log);
+    if (res != 0) {
+        LOG_WITH_PEER_ID(ERROR) << "Fail to append split log";
+        return res;
+    }
+
+    return 0;
+}
+
 void SingleMachine::on_apply(braft::Iterator &iter) {
+    // TODO: Deal with split/merge operation.
     for (; iter.valid(); iter.next()) {
-        braft::AsyncClosureGuard closure_guard(iter.done());
+        if (iter.done()) {
+            braft::AsyncClosureGuard closure_guard(iter.done());
+        }
+
+        UpperLog upper_log;
+        // FIXME: 能拷贝过来么？
+        butil::IOBuf data_copy = iter.data();
+        upper_log.deserialize_from(&data_copy);
+
+        if (upper_log.get_type() == UpperLog::LogType::SPLIT) {
+            
+        } else {
+            LOG_WITH_PEER_ID(ERROR) << "Unknown log type: " << upper_log.type();
+        }
 
         LOG_WITH_PEER_ID(INFO)
             << "Node " << _node->node_id()
