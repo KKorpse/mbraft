@@ -75,7 +75,7 @@ class MulitGroupRaftManager {
         StateMachine(SingleMachine *mch) {
             CHECK(machine != nullptr);
             machine.reset(mch);
-            state = FOLLOWER;
+            state = ELECTION;
         }
         std::unique_ptr<SingleMachine> machine;
         GroupState state;
@@ -91,22 +91,11 @@ class MulitGroupRaftManager {
 
     // group_idx: the index of the group in the _machines.
     // conf: the new configuration of the group.
+    // Only the leader of the group can call this function.
     int split_raft_group(int32_t group_idx, braft::Configuration &conf,
-                         NewConfiguration &new_conf) {
-        CHECK_LT(group_idx, _machines.size());
-        if (!_is_coordinating()) {
-            LOG(ERROR) << "This node is not coordinating leader change.";
-            return -1;
-        }
-        if (!_is_all_leader_on_this_node()) {
-            LOG(ERROR) << "All leader should be on this "
-                          "node when split group.";
-            return -1;
-        }
-        
+                         NewConfiguration &new_conf);
 
-        return 0;
-    }
+    int add_raft_group(braft::Configuration &conf, braft::PeerId peer_id);
 
    private:
     void on_leader_start(int32_t group_idx);
@@ -126,7 +115,7 @@ class MulitGroupRaftManager {
     bool _is_all_leader_on_this_node();
 
     ManagerState _state = NORMAL;
-    std::mutex _cood_mutex;
+    std::mutex _mutex;
     std::atomic<size_t> _needed_count{0};  // The number of groups need to be
                                            // coordinated.
 };

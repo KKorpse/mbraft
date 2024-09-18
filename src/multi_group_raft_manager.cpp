@@ -53,6 +53,50 @@ void MulitGroupRaftManager::init_and_start(
     }
 }
 
+int MulitGroupRaftManager::split_raft_group(int32_t group_idx,
+                                            braft::Configuration &conf,
+                                            NewConfiguration &new_conf) {
+    CHECK_LT(group_idx, _machines.size());
+    if (!_is_coordinating()) {
+        LOG_WITH_NAME(ERROR) << "This node is not coordinating leader change.";
+        return -1;
+    }
+    if (!_is_all_leader_on_this_node()) {
+        LOG_WITH_NAME(ERROR) << "All leader should be on this "
+                      "node when split group.";
+        return -1;
+    }
+
+    int res = _machines[group_idx].machine->append_split_log(new_conf);
+    if (res != 0) {
+        LOG_WITH_NAME(ERROR) << "Fail to append split log";
+        return res;
+    }
+
+    LOG_WITH_NAME(WARNING) << "FLAG: Start to split group.";
+    return 0;
+}
+
+int MulitGroupRaftManager::add_raft_group(braft::Configuration &conf,
+                                          braft::PeerId peer_id) {
+    std::unique_lock<std::mutex> lock(_mutex);
+
+    SingleMachineOptions machine_options;
+    machine_options.raft_manager = this;
+    machine_options.peers = conf;
+    machine_options.group_idx = _machines.size();
+    machine_options.peer_id = peer_id;
+    machine_options.group_id = _config_manager.get_group_id();
+    _machines.emplace_back(new SingleMachine);
+    int res = _machines.back().machine->init(machine_options);
+    if (res != 0) {
+        LOG_WITH_NAME(ERROR) << "Fail to init SingleMachine";
+        return res;
+    }
+
+    return 0;
+}
+
 void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
     CHECK(machine != nullptr);
     auto sm = static_cast<SingleMachine *>(machine);
@@ -61,8 +105,10 @@ void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
 }
 
 void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
-    std::lock_guard<std::mutex> lock(_cood_mutex);
+    std::lock_guard<std::mutex> lock(_mutex);
     _machines[group_idx].state = LEADER;
+    LOG_WITH_NAME(INFO) << "Group " << group_idx << " starts to be leader.";
+
     if (group_idx == 0) {
         // We do not deal with unexpecttable leader change, we assume that the
         // net work and all nodes are stable. So the leader change only happens
@@ -91,27 +137,35 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
             }
         }
 
-    } else {
-        LOG_WITH_NAME(INFO) << "Group " << group_idx << " starts to be leader.";
-        if (!_is_coordinating()) {
-            // 1. The coordinating is not start yet.
-            // 2. or this node is not coordinating node. (The group[0]'s leader
-            // node).
-            LOG_WITH_NAME(INFO)
-                << "group election down, but Not in coordinating or this node "
-                   "is not coordinating node.";
+        return;
+    }
+
+    if (!_is_coordinating()) {
+        // 0. This raft group the new group by spliting.
+        if (_state == LEADING) {
+            LOG_WITH_NAME(WARNING)
+                << "FLAG: new group leader start, and no need to "
+                   "coordinate.";
             return;
         }
 
-        // Count down the needed count.
-        CHECK_GT(_needed_count, 0)
-            << "The needed count should be greater than 0.";
-        --_needed_count;
-        if (_needed_count == 0) {
-            LOG_WITH_NAME(INFO)
-                << "FLAG: All group election done, finish coordinating.";
-            _state = LEADING;
-        }
+        // 1. The coordinating is not start yet.
+        // 2. or this node is not coordinating node. (The group[0]'s leader
+        // node).
+        LOG_WITH_NAME(WARNING)
+            << "group election down, but Not in coordinating or this node "
+               "is not coordinating node.";
+
+        return;
+    }
+
+    // Count down the needed count.
+    CHECK_GT(_needed_count, 0) << "The needed count should be greater than 0.";
+    --_needed_count;
+    if (_needed_count == 0) {
+        LOG_WITH_NAME(INFO)
+            << "FLAG: All group election done, finish coordinating.";
+        _state = LEADING;
     }
 }
 
@@ -121,10 +175,17 @@ int MulitGroupRaftManager::on_start_following(int32_t group_idx) {
         return -1;
     }
 
-    std::lock_guard<std::mutex> lock(_cood_mutex);
+    std::lock_guard<std::mutex> lock(_mutex);
     _machines[group_idx].state = FOLLOWER;
 
     if (!_is_coordinating()) {
+        // 0. This raft group the new group by spliting.
+        if (_state == LEADING) {
+            LOG_WITH_NAME(WARNING)
+                << "new group election done, need to coordinate.";
+            return _start_leader_change(group_idx);
+        }
+
         // 1. The coordinating is not start yet.
         // 2. or this node is not coordinating node. (The group[0]'s leader
         // node).

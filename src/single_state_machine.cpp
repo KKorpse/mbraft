@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <braft/configuration.h>
 #include <braft/protobuf_file.h>  // braft::ProtoBufFile
 #include <braft/raft.h>           // braft::Node braft::StateMachine
 #include <braft/storage.h>        // braft::SnapshotWriter
@@ -41,8 +42,13 @@ DEFINE_int32(snapshot_interval, 72000, "Interval between each snapshot");
 int SingleMachine::init(SingleMachineOptions &options) {
     CHECK(options.raft_manager != nullptr);
 
-    // 1. Init Server
-    _server.reset(new brpc::Server());
+    // 1. Init Server (with 64 bytes alignment)
+    void *mem = aligned_alloc(64, sizeof(brpc::Server));
+    if (!mem) {
+        LOG(ERROR) << "Fail to allocate memory for brpc::Server";
+        return -1;
+    }
+    _server.reset(new (mem) brpc::Server());
 
     auto service = new SingleMachineServiceImpl(this);
     _server->AddService(service, brpc::SERVER_OWNS_SERVICE);
@@ -94,21 +100,43 @@ int SingleMachine::append_split_log(NewConfiguration &new_conf,
 }
 
 void SingleMachine::on_apply(braft::Iterator &iter) {
-    // TODO: Deal with split/merge operation.
     for (; iter.valid(); iter.next()) {
         if (iter.done()) {
             braft::AsyncClosureGuard closure_guard(iter.done());
         }
 
         UpperLog upper_log;
-        // FIXME: 能拷贝过来么？
+        // FIXME: 实际数据能拷贝过来么？
         butil::IOBuf data_copy = iter.data();
         upper_log.deserialize_from(&data_copy);
 
         if (upper_log.get_type() == UpperLog::LogType::SPLIT) {
-            
+            assert(_raft_manager != nullptr);
+            NewConfiguration new_conf;
+            new_conf.deserialize_from(upper_log.get_data());
+
+            // To distinguish the new address corresponding to the current node,
+            // NewConfiguration uses a map for mapping, where the key is the
+            // address of each node in the source raft group.
+            braft::PeerId peer_id;
+            if (new_conf.get_peer(_peer_id.to_string(), peer_id) != 0) {
+                LOG_WITH_PEER_ID(ERROR) << "Fail to get peer";
+                continue;
+            }
+
+            braft::Configuration conf = new_conf.to_braft_configuration();
+            if (_raft_manager->add_raft_group(conf, peer_id) != 0) {
+                LOG_WITH_PEER_ID(ERROR) << "Fail to add raft group";
+                continue;
+            }
+
+        } else if (upper_log.get_type() == UpperLog::LogType::MERGE) {
+            // TODO:
+        } else if (upper_log.get_type() == UpperLog::LogType::NORMAL) {
+            LOG(INFO) << "Apply normal log";
         } else {
-            LOG_WITH_PEER_ID(ERROR) << "Unknown log type: " << upper_log.type();
+            LOG_WITH_PEER_ID(ERROR)
+                << "Unknown log type: " << upper_log.get_type();
         }
 
         LOG_WITH_PEER_ID(INFO)

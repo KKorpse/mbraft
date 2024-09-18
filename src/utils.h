@@ -79,6 +79,15 @@ class NewConfiguration {
         return _peers.emplace(key, peer).second;
     }
 
+    int get_peer(const std::string& key, braft::PeerId& peer) const {
+        auto it = _peers.find(key);
+        if (it == _peers.end()) {
+            return 1;
+        }
+        peer = it->second;
+        return 0;
+    }
+
     // Remove a peer.
     // Returns true if the peer is removed.
     bool remove_peer(const std::string& key) { return _peers.erase(key); }
@@ -156,6 +165,14 @@ class NewConfiguration {
             _peers[key] = peer;
         }
         return 0;
+    }
+
+    braft::Configuration to_braft_configuration() const {
+        braft::Configuration conf;
+        for (const auto& peer : _peers) {
+            conf.add_peer(peer.second);
+        }
+        return conf;
     }
 
    private:
