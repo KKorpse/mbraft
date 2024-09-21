@@ -63,7 +63,7 @@ int MulitGroupRaftManager::split_raft_group(int32_t group_idx,
     }
     if (!_is_all_leader_on_this_node()) {
         LOG_WITH_NAME(ERROR) << "All leader should be on this "
-                      "node when split group.";
+                                "node when split group.";
         return -1;
     }
 
@@ -77,9 +77,42 @@ int MulitGroupRaftManager::split_raft_group(int32_t group_idx,
     return 0;
 }
 
+int MulitGroupRaftManager::merge_raft_group(int32_t source_group_id,
+                                            int32_t target_group_id) {
+    std::unique_lock<std::mutex> lock(_mutex);
+    CHECK((size_t)source_group_id < _machines.size());
+    CHECK((size_t)target_group_id < _machines.size());
+    if (_is_coordinating()) {
+        LOG_WITH_NAME(ERROR) << "This node is coordinating leader change.";
+        return -1;
+    }
+
+    if (_is_leading()) {
+        LOG_WITH_NAME(ERROR) << "This node is leader node.";
+        return -1;
+    }
+
+    _target_group_id = target_group_id;
+
+    // Stop the source_group
+    bool is_source = true;
+    auto res = _machines[source_group_id].machine->append_merge_log(is_source);
+    if (res != 0) {
+        LOG_WITH_NAME(ERROR) << "Fail to append merge log";
+        return res;
+    }
+
+    return 0;
+}
+
 int MulitGroupRaftManager::add_raft_group(braft::Configuration &conf,
                                           braft::PeerId peer_id) {
     std::unique_lock<std::mutex> lock(_mutex);
+
+    if (_is_coordinating()) {
+        LOG_WITH_NAME(ERROR) << "This node is coordinating leader change.";
+        return -1;
+    }
 
     SingleMachineOptions machine_options;
     machine_options.raft_manager = this;
@@ -94,6 +127,43 @@ int MulitGroupRaftManager::add_raft_group(braft::Configuration &conf,
         return res;
     }
 
+    return 0;
+}
+
+int MulitGroupRaftManager::on_merge_source_apply() {
+    std::unique_lock<std::mutex> lock(_mutex);
+    if (_target_group_id == INVALIED_GROUP_IDX) {
+        LOG_WITH_NAME(ERROR) << "Invalid target group id when merge!";
+        return -1;
+    }
+
+    if (!_is_leading()) {
+        LOG_WITH_NAME(WARNING) << "This node is not leader node.";
+        return 0;
+    }
+
+    CHECK((size_t)_target_group_id < _machines.size());
+    bool is_source = false;
+    auto res = _machines[_target_group_id].machine->append_merge_log(is_source);
+    if (res != 0) {
+        LOG_WITH_NAME(ERROR) << "Fail to append merge log";
+        return res;
+    }
+
+    return 0;
+}
+
+int MulitGroupRaftManager::on_merge_target_apply() {
+    std::unique_lock<std::mutex> lock(_mutex);
+
+    if (!_is_leading()) {
+        LOG_WITH_NAME(WARNING) << "This node is not leader node.";
+        return 0;
+    }
+
+    _target_group_id = INVALIED_GROUP_IDX;
+    LOG(WARNING) << "FLAG: Merge target group done.";
+    
     return 0;
 }
 
@@ -229,4 +299,5 @@ bool MulitGroupRaftManager::_is_all_leader_on_this_node() {
     }
     return true;
 }
+
 }  // namespace mbraft

@@ -50,8 +50,9 @@ class UpperLog {
     enum LogType {
         INVALID = 0,
         SPLIT = 1,
-        MERGE = 2,
-        NORMAL = 3,
+        MERGE_SOURCE = 2,  // source group should stop
+        MERGE_TARGET = 3,
+        NORMAL = 4,
     };
 
    public:
@@ -134,6 +135,8 @@ class SingleMachine : public braft::StateMachine {
     }
 
     int append_split_log(NewConfiguration &new_conf,
+                         braft::Closure *done = nullptr);
+    int append_merge_log(bool is_source = false,
                          braft::Closure *done = nullptr);
 
    public:

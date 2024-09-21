@@ -99,6 +99,19 @@ int SingleMachine::append_split_log(NewConfiguration &new_conf,
     return 0;
 }
 
+int SingleMachine::append_merge_log(bool is_source, braft::Closure *done) {
+    UpperLog upper_log(is_source ? UpperLog::LogType::MERGE_SOURCE
+                                 : UpperLog::LogType::MERGE_TARGET,
+                       "");
+    int res = append_task(upper_log);
+    if (res != 0) {
+        LOG_WITH_PEER_ID(ERROR) << "Fail to append merge log";
+        return res;
+    }
+
+    return 0;
+}
+
 void SingleMachine::on_apply(braft::Iterator &iter) {
     for (; iter.valid(); iter.next()) {
         if (iter.done()) {
@@ -130,10 +143,21 @@ void SingleMachine::on_apply(braft::Iterator &iter) {
                 continue;
             }
 
-        } else if (upper_log.get_type() == UpperLog::LogType::MERGE) {
-            // TODO:
+        } else if (upper_log.get_type() == UpperLog::LogType::MERGE_SOURCE) {
+            // Do not deal with the logs
+            // TODO: Maybe add some mock functions here?
+            _node->shutdown(NULL);
+            _raft_manager->on_merge_source_apply();
+            LOG(INFO) << "Merge source, shutdown node";
+
+        } else if (upper_log.get_type() == UpperLog::LogType::MERGE_TARGET) {
+            _raft_manager->on_merge_target_apply();
+            LOG(INFO) << "Merge target";
+            // Nothing todo here.
+
         } else if (upper_log.get_type() == UpperLog::LogType::NORMAL) {
             LOG(INFO) << "Apply normal log";
+
         } else {
             LOG_WITH_PEER_ID(ERROR)
                 << "Unknown log type: " << upper_log.get_type();

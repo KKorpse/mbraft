@@ -95,7 +95,14 @@ class MulitGroupRaftManager {
     int split_raft_group(int32_t group_idx, braft::Configuration &conf,
                          NewConfiguration &new_conf);
 
+    // Merge source group to target group
+    int merge_raft_group(int32_t source_group_id, int32_t target_group_id);
+
+    // Add a new raft group to the manager.
     int add_raft_group(braft::Configuration &conf, braft::PeerId peer_id);
+
+    int on_merge_source_apply();
+    int on_merge_target_apply();
 
    private:
     void on_leader_start(int32_t group_idx);
@@ -112,12 +119,17 @@ class MulitGroupRaftManager {
    private:
     int _start_leader_change(int32_t group_idx);
     bool _is_coordinating() { return _state == COORDINATING; }
+    bool _is_leading() { return _state == LEADING; }
     bool _is_all_leader_on_this_node();
 
     ManagerState _state = NORMAL;
     std::mutex _mutex;
-    std::atomic<size_t> _needed_count{0};  // The number of groups need to be
-                                           // coordinated.
+    // The number of groups need to be coordinated.
+    std::atomic<size_t> _needed_count{0};
+
+    // merge/split
+   private:
+    int32_t _target_group_id = INVALIED_GROUP_IDX;
 };
 
 class SingleMachineServiceImpl : public SingleMachineService {
