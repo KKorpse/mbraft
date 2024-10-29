@@ -1,0 +1,18 @@
+{
+    "node_number": 1,
+    "stream_number": 4,
+    "group_id": "666",
+    "name": "node0",
+    "node_configs": [
+        {
+            "name": "node0",
+            "addresses": [
+                "127.0.0.1:8010",
+                "127.0.0.1:8011",
+                "127.0.0.1:8012",
+                "127.0.0.1:8013"
+            ],
+            "priority": 0
+        }
+    ]
+}

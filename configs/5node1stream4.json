@@ -1,0 +1,43 @@
+{
+    "node_number": 5,
+    "stream_number": 1,
+    "group_id": "666",
+    "name": "node4",
+    "node_configs": [
+        {
+            "name": "node0",
+            "addresses": [
+                "127.0.0.1:8010"
+            ],
+            "priority": 0
+        },
+        {
+            "name": "node1",
+            "addresses": [
+                "127.0.0.1:8020"
+            ],
+            "priority": 1
+        },
+        {
+            "name": "node2",
+            "addresses": [
+                "127.0.0.1:8030"
+            ],
+            "priority": 2
+        },
+        {
+            "name": "node3",
+            "addresses": [
+                "127.0.0.1:8040"
+            ],
+            "priority": 3
+        },
+        {
+            "name": "node4",
+            "addresses": [
+                "127.0.0.1:8050"
+            ],
+            "priority": 4
+        }
+    ]
+}
