@@ -34,23 +34,36 @@
 
 namespace mbraft {
 // TODO:
-void MulitGroupRaftManager::init_and_start(
+int MulitGroupRaftManager::init_and_start(
     MulitGroupRaftManagerOptions &options) {
     CHECK_GE(options.group_count, 0);
-    CHECK_EQ(options.group_count, options.configs.size());
-    CHECK_EQ(options.group_count, options.server_ids.size());
+
+    ConfigurationManagerOptions cfg_options;
+    cfg_options.config_file_path = options.confg_file_path;
+    auto ret = _config_manager.init(std::move(cfg_options));
+    if (!ret.ok()) {
+        LOG_WITH_NAME(ERROR) << "Fail to init config manager, res: " << ret;
+        return -1;
+    }
+    auto server_ids = _config_manager.get_server_ids();
     _name = options.name;
 
     for (int32_t idx = 0; idx < options.group_count; ++idx) {
         SingleMachineOptions machine_options;
         machine_options.raft_manager = this;
-        machine_options.peers = options.configs[idx];
+        machine_options.peers = _config_manager.get_config_at_index(idx);
         machine_options.group_idx = idx;
-        machine_options.peer_id = options.server_ids[idx];
+        machine_options.peer_id = server_ids[idx];
         machine_options.group_id = _config_manager.get_group_id();
         _machines.emplace_back(new SingleMachine);
         _machines.back().machine->init(machine_options);
     }
+
+    LOG_WITH_NAME(INFO) << "Group init done."
+                        << " group count: " << options.group_count
+                        << "peer_ids: " << _config_manager.to_string();
+
+    return 0;
 }
 
 int MulitGroupRaftManager::split_raft_group(int32_t group_idx,
@@ -163,7 +176,7 @@ int MulitGroupRaftManager::on_merge_target_apply() {
 
     _target_group_id = INVALIED_GROUP_IDX;
     LOG(WARNING) << "FLAG: Merge target group done.";
-    
+
     return 0;
 }
 

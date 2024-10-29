@@ -43,11 +43,7 @@ struct MulitGroupRaftManagerOptions {
     // The number of groups.
     int32_t group_count = INVALIED_GROUP_IDX;
 
-    // Addr of each group on this node.
-    std::vector<braft::PeerId> server_ids;
-
-    // Peers of each group.
-    std::vector<braft::Configuration> configs;
+    std::string confg_file_path;
 
     std::string name;
 };
@@ -86,7 +82,7 @@ class MulitGroupRaftManager {
     ~MulitGroupRaftManager() {}
 
     // Init all raft groups and start brpc service.
-    void init_and_start(MulitGroupRaftManagerOptions &options);
+    int init_and_start(MulitGroupRaftManagerOptions &options);
     ManagerState state() { return _state; }
 
     // group_idx: the index of the group in the _machines.

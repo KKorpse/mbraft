@@ -45,7 +45,7 @@ int SingleMachine::init(SingleMachineOptions &options) {
     // 1. Init Server (with 64 bytes alignment)
     void *mem = aligned_alloc(64, sizeof(brpc::Server));
     if (!mem) {
-        LOG(ERROR) << "Fail to allocate memory for brpc::Server";
+        LOG_WITH_PEER_ID(ERROR) << "Fail to allocate memory for brpc::Server";
         return -1;
     }
     _server.reset(new (mem) brpc::Server());

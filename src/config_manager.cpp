@@ -2,6 +2,7 @@
 #include <butil/logging.h>
 #include <gflags/gflags.h>
 
+#include <cstddef>
 #include <string>
 
 #include "config_manager.h"
@@ -126,7 +127,7 @@ butil::Status ConfigurationManager::load_config_from_file() {
 bool ConfigurationManager::add_one_peer(std::string& name,
                                         NodeConfiguration& node_config) {
     auto& ids = node_config.addresses;
-    CHECK(ids.size() == _stream_number);
+    CHECK(ids.size() == (size_t)_stream_number);
     CHECK(_node_configs.find(name) == _node_configs.end());
     _node_configs.insert(std::make_pair(name, node_config));
     _node_number += 1;
