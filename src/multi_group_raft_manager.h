@@ -44,8 +44,6 @@ struct MulitGroupRaftManagerOptions {
     int32_t group_count = INVALIED_GROUP_IDX;
 
     std::string confg_file_path;
-
-    std::string name;
 };
 
 // Manage all the raft groups, limit all the leader on one node.
@@ -69,7 +67,7 @@ class MulitGroupRaftManager {
 
     struct StateMachine {
         StateMachine(SingleMachine *mch) {
-            CHECK(machine != nullptr);
+            CHECK(mch != nullptr);
             machine.reset(mch);
             state = ELECTION;
         }

@@ -41,6 +41,8 @@ DEFINE_int32(snapshot_interval, 72000, "Interval between each snapshot");
 
 int SingleMachine::init(SingleMachineOptions &options) {
     CHECK(options.raft_manager != nullptr);
+    _group_idx = options.group_idx;
+    _peer_id = options.peer_id;
 
     // 1. Init Server (with 64 bytes alignment)
     void *mem = aligned_alloc(64, sizeof(brpc::Server));
@@ -255,7 +257,7 @@ void SingleMachine::on_error(const ::braft::Error &e) {
 }
 void SingleMachine::on_configuration_committed(
     const ::braft::Configuration &conf) {
-    LOG_WITH_PEER_ID(ERROR) << "Configuration committed not implemented";
+    LOG_WITH_PEER_ID(INFO) << "Configuration committed not implemented";
 }
 
 void SingleMachine::on_stop_following(const ::braft::LeaderChangeContext &ctx) {

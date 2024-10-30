@@ -59,11 +59,7 @@ struct NodeConfiguration {
 };
 
 struct ConfigurationManagerOptions {
-    ConfigurationManagerOptions() = default;
-    ~ConfigurationManagerOptions() = default;
-
     std::string config_file_path;
-    Database *db;
 };
 
 // Manager the history of configuration changing
@@ -75,7 +71,7 @@ class ConfigurationManager {
     // 1. Set the configuration file path.
     // 2. Load the configuration from the file.
     // 3. Try to load the configuration from table in memory. (这个以后再实现)
-    butil::Status init(ConfigurationManagerOptions &&options);
+    butil::Status init(std::string config_file_path);
 
     // load the configuration from the file. Initialize this class' member.
     // the configuration from file has less origin_priority than the
@@ -231,9 +227,6 @@ class ConfigurationManager {
 
     // The configuration file path.
     std::string _config_file_path;
-
-    // Used to implement the load_config_from_memory() func.
-    Database *_db;
 };
 
 }  // namespace mbraft

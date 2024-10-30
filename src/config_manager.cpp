@@ -51,13 +51,14 @@ void ConfigurationManager::_load_default_config() {
 }
 
 butil::Status ConfigurationManager::init(
-    ConfigurationManagerOptions&& options) {
+    std::string config_file_path) {
     if (FLAGS_raft_use_default_config) {
         LOG(INFO) << "Use default config";
         _load_default_config();
         return butil::Status::OK();
     }
-    _config_file_path = options.config_file_path;
+    std::cout << config_file_path;
+    _config_file_path = config_file_path;
     if (!FLAGS_raft_config_path.empty()) {
         _config_file_path = FLAGS_raft_config_path;
     }

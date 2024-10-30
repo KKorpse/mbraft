@@ -36,17 +36,13 @@ namespace mbraft {
 // TODO:
 int MulitGroupRaftManager::init_and_start(
     MulitGroupRaftManagerOptions &options) {
-    CHECK_GE(options.group_count, 0);
-
-    ConfigurationManagerOptions cfg_options;
-    cfg_options.config_file_path = options.confg_file_path;
-    auto ret = _config_manager.init(std::move(cfg_options));
+    auto ret = _config_manager.init(options.confg_file_path);
     if (!ret.ok()) {
         LOG_WITH_NAME(ERROR) << "Fail to init config manager, res: " << ret;
         return -1;
     }
     auto server_ids = _config_manager.get_server_ids();
-    _name = options.name;
+    _name = _config_manager.get_name();
 
     for (int32_t idx = 0; idx < options.group_count; ++idx) {
         SingleMachineOptions machine_options;
@@ -220,6 +216,11 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
             }
         }
 
+        if (_needed_count == 0) {
+            _state = LEADING;
+            LOG_WITH_NAME(INFO)
+                << "FLAG: All group election done, finish coordinating.";
+        }
         return;
     }
 
