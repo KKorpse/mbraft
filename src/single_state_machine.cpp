@@ -257,7 +257,7 @@ void SingleMachine::on_error(const ::braft::Error &e) {
 }
 void SingleMachine::on_configuration_committed(
     const ::braft::Configuration &conf) {
-    LOG_WITH_PEER_ID(INFO) << "Configuration committed not implemented";
+    // LOG_WITH_PEER_ID(INFO) << "Configuration committed not implemented";
 }
 
 void SingleMachine::on_stop_following(const ::braft::LeaderChangeContext &ctx) {

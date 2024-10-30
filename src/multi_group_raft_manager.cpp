@@ -51,6 +51,7 @@ int MulitGroupRaftManager::init_and_start(
         machine_options.group_idx = idx;
         machine_options.peer_id = server_ids[idx];
         machine_options.group_id = _config_manager.get_group_id();
+        machine_options.data_path = _name + "group" + std::to_string(idx);
         _machines.emplace_back(new SingleMachine);
         _machines.back().machine->init(machine_options);
     }
