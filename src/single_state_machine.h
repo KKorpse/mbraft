@@ -139,6 +139,8 @@ class SingleMachine : public braft::StateMachine {
     int append_merge_log(bool is_source = false,
                          braft::Closure *done = nullptr);
 
+    int group_idx() { return _group_idx; }
+
    public:
     int init(SingleMachineOptions &options);
     bool is_leader() { return _is_leader; }

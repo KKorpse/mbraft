@@ -183,17 +183,21 @@ int SingleMachine::on_snapshot_load(braft::SnapshotReader *reader) {
 }
 
 int SingleMachine::change_leader_to(braft::PeerId to) {
-    int res = _node->transfer_leadership_to(to);
-    if (res != 0) {
-        LOG_WITH_PEER_ID(ERROR)
-            << "Fail to transfer leader to " << to.to_string();
-        return res;
+    while (_node->transfer_leadership_to(to)) {
+        LOG_WITH_PEER_ID(WARNING) << "Fail to transfer leader to " << to.to_string()
+                     << ", retry after 1s";
+        bthread_usleep(1000 * 1000);
     }
+
+    LOG_WITH_PEER_ID(WARNING) << "Transfer leader to " << to.to_string() << " successfully";
     return 0;
 }
 
 int SingleMachine::request_leadership() {
-    CHECK(!_is_leader);
+    if (_is_leader) {
+        LOG_WITH_PEER_ID(ERROR) << "This node is leader, should not came here.";
+        return -1;
+    }
     CHECK(_node != nullptr);
     auto leader = _node->leader_id();
     CHECK(!leader.is_empty());

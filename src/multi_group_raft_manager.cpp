@@ -187,7 +187,7 @@ void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
 void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
     std::lock_guard<std::mutex> lock(_mutex);
     _machines[group_idx].state = LEADER;
-    LOG_WITH_NAME(INFO) << "Group " << group_idx << " starts to be leader.";
+    LOG_WITH_NAME(WARNING) << "Group " << group_idx << " starts to be leader.";
 
     if (group_idx == 0) {
         // We do not deal with unexpecttable leader change, we assume that the
@@ -202,7 +202,7 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
         }
 
         // Start to coordinate leader.
-        LOG_WITH_NAME(INFO) << "FLAG: Start to coordinate leader.";
+        LOG_WITH_NAME(WARNING) << "FLAG: Start to coordinate leader.";
         _state = COORDINATING;
         _needed_count = 0;
         for (auto &machine : _machines) {
@@ -211,7 +211,10 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
             }
             ++_needed_count;
             if (machine.state == FOLLOWER) {
-                CHECK_EQ(_start_leader_change(group_idx), 0)
+                LOG_WITH_NAME(WARNING) << "FLAG: Start to change leader for "
+                                          "group: "
+                                       << machine.machine->group_idx();
+                CHECK_EQ(_start_leader_change(machine.machine->group_idx()), 0)
                     << "Fail to start leader "
                        "change.";
             }
@@ -219,8 +222,8 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
 
         if (_needed_count == 0) {
             _state = LEADING;
-            LOG_WITH_NAME(INFO)
-                << "FLAG: All group election done, finish coordinating.";
+            LOG_WITH_NAME(WARNING)
+                << "FFFFFFFFFFFFFFFFFFFFFLAG: All group election done, finish coordinating.";
         }
         return;
     }
@@ -247,9 +250,12 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
     // Count down the needed count.
     CHECK_GT(_needed_count, 0) << "The needed count should be greater than 0.";
     --_needed_count;
+
+    LOG_WITH_NAME(INFO) << "FLAG: Group " << group_idx
+                           << " needed count: " << _needed_count;
     if (_needed_count == 0) {
-        LOG_WITH_NAME(INFO)
-            << "FLAG: All group election done, finish coordinating.";
+        LOG_WITH_NAME(WARNING)
+            << "FFFFFFFFFFFFFFFFFFFFFLAG: All group election done, finish coordinating.";
         _state = LEADING;
     }
 }
@@ -259,6 +265,9 @@ int MulitGroupRaftManager::on_start_following(int32_t group_idx) {
         LOG_WITH_NAME(ERROR) << "Invalid group id: " << group_idx;
         return -1;
     }
+
+    LOG_WITH_NAME(WARNING) << "Group " << group_idx
+                           << " starts to be follower.";
 
     std::lock_guard<std::mutex> lock(_mutex);
     _machines[group_idx].state = FOLLOWER;
