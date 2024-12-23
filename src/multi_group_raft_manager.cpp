@@ -177,6 +177,15 @@ int MulitGroupRaftManager::on_merge_target_apply() {
     return 0;
 }
 
+int MulitGroupRaftManager::append_log(int32_t group_idx, UpperLog &upper_log) {
+    if ((size_t)group_idx >= _machines.size()) {
+        LOG(ERROR) << "Invalid group id: " << group_idx;
+        return -1;
+    }
+
+    return _machines[group_idx].machine->append_task(upper_log);
+}
+
 void *MulitGroupRaftManager::send_change_leader_req(void *machine) {
     CHECK(machine != nullptr);
     auto sm = static_cast<SingleMachine *>(machine);
@@ -222,8 +231,8 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
 
         if (_needed_count == 0) {
             _state = LEADING;
-            LOG_WITH_NAME(WARNING)
-                << "FFFFFFFFFFFFFFFFFFFFFLAG: All group election done, finish coordinating.";
+            LOG_WITH_NAME(WARNING) << "FFFFFFFFFFFFFFFFFFFFFLAG: All group "
+                                      "election done, finish coordinating.";
         }
         return;
     }
@@ -252,10 +261,10 @@ void MulitGroupRaftManager::on_leader_start(int32_t group_idx) {
     --_needed_count;
 
     LOG_WITH_NAME(INFO) << "FLAG: Group " << group_idx
-                           << " needed count: " << _needed_count;
+                        << " needed count: " << _needed_count;
     if (_needed_count == 0) {
-        LOG_WITH_NAME(WARNING)
-            << "FFFFFFFFFFFFFFFFFFFFFLAG: All group election done, finish coordinating.";
+        LOG_WITH_NAME(WARNING) << "FFFFFFFFFFFFFFFFFFFFFLAG: All group "
+                                  "election done, finish coordinating.";
         _state = LEADING;
     }
 }

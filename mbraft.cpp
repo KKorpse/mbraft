@@ -18,7 +18,7 @@ void election_rtt_test() {
         managers.emplace_back(new mbraft::MulitGroupRaftManager);
         mbraft::MulitGroupRaftManagerOptions options;
         options.group_count = FLAGS_num_streams;
-        options.confg_file_path = "configs/" + std::to_string(FLAGS_num_nodes) +
+        options.confg_file_path = "../configs/" + std::to_string(FLAGS_num_nodes) +
                                   "node" + std::to_string(FLAGS_num_streams) +
                                   "stream" + std::to_string(i) + ".json";
         managers[i]->init_and_start(options);

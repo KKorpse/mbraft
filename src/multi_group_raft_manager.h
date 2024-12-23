@@ -98,6 +98,8 @@ class MulitGroupRaftManager {
     int on_merge_source_apply();
     int on_merge_target_apply();
 
+    int append_log(int32_t group_idx, UpperLog &upper_log);
+
    private:
     void on_leader_start(int32_t group_idx);
     int on_start_following(int32_t group_idx);
